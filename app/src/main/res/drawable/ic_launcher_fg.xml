@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「栈」的意象：三条线压在一块，从长到短往上收 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M30,64 H78" android:strokeColor="#8f8cff"
+        android:strokeWidth="7" android:strokeLineCap="round" />
+    <path android:pathData="M36,54 H72" android:strokeColor="#7c9cff"
+        android:strokeWidth="7" android:strokeLineCap="round" />
+    <path android:pathData="M42,44 H66" android:strokeColor="#4fe3d0"
+        android:strokeWidth="7" android:strokeLineCap="round" />
+</vector>
