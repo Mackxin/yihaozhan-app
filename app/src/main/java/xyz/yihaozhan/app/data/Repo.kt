@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 object Repo {
 
     /** 站点仓库里的数据文件。改域名只改这一处。 */
-    private const val URL = "https://mackxin.github.io/xingyu/api/app.json"
+    const val URL = "https://mackxin.github.io/xingyu/api/app.json"
     private const val FILE_NAME = "app.json"
 
     private val client by lazy {
@@ -73,4 +73,16 @@ object Repo {
             cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         }.getOrDefault(false)
     }
+
+    /** 缓存占多少字节 —— 设置页要显示「整站存在手机里占了多少」 */
+    fun cacheSize(ctx: Context): Long = runCatching {
+        val f = file(ctx)
+        if (f.exists()) f.length() else 0L
+    }.getOrDefault(0L)
+
+    /** 清掉本地缓存。清完界面还在（内存里还有一份），下次冷启动才需要联网。 */
+    fun clearCache(ctx: Context): Boolean = runCatching {
+        val f = file(ctx)
+        if (f.exists()) f.delete() else true
+    }.getOrDefault(false)
 }

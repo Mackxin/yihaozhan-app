@@ -198,22 +198,31 @@ fun inlineMd(src: String): AnnotatedString = buildAnnotatedString {
 }
 
 @Composable
-fun MarkdownView(md: String, modifier: Modifier = Modifier) {
+fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1f) {
     val blocks = parseMarkdown(md)
     val mono = FontFamily.Monospace
+    /* 字号倍数来自设置页；行高一起放大，不然大字会挤在一起 */
+    fun sz(v: Float) = (v * fontScale).sp
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.forEach { b ->
             when (b) {
                 is MdBlock.Heading -> Text(
                     inlineMd(b.text),
-                    fontSize = when (b.level) { 1 -> 24.sp; 2 -> 21.sp; 3 -> 18.sp; else -> 16.sp },
+                    fontSize = sz(
+                        when (b.level) {
+                            1 -> 24f
+                            2 -> 21f
+                            3 -> 18f
+                            else -> 16f
+                        }
+                    ),
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 30.sp,
+                    lineHeight = sz(30f),
                     modifier = Modifier.padding(top = if (b.level <= 2) 8.dp else 4.dp)
                 )
 
                 is MdBlock.Para -> Text(
-                    inlineMd(b.text), fontSize = 16.sp, lineHeight = 28.sp,
+                    inlineMd(b.text), fontSize = sz(16f), lineHeight = sz(28f),
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
@@ -229,7 +238,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier) {
                             .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
                     )
                     Text(
-                        inlineMd(b.text), fontSize = 15.sp, lineHeight = 26.sp,
+                        inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(26f),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp)
                     )
@@ -238,8 +247,8 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier) {
                 is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     b.items.forEach {
                         Row {
-                            Text("•", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = 16.sp, lineHeight = 27.sp)
+                            Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
+                            Text(inlineMd(it), fontSize = sz(16f), lineHeight = sz(27f))
                         }
                     }
                 }
@@ -247,15 +256,15 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier) {
                 is MdBlock.Numbers -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     b.items.forEachIndexed { idx, it ->
                         Row {
-                            Text("${idx + 1}.", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = 16.sp, lineHeight = 27.sp)
+                            Text("${idx + 1}.", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
+                            Text(inlineMd(it), fontSize = sz(16f), lineHeight = sz(27f))
                         }
                     }
                 }
 
                 is MdBlock.Code -> Text(
                     b.code,
-                    fontFamily = mono, fontSize = 13.sp, lineHeight = 21.sp,
+                    fontFamily = mono, fontSize = sz(13f), lineHeight = sz(21f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
@@ -276,7 +285,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier) {
                     b.rows.forEachIndexed { idx, row ->
                         Text(
                             inlineMd(row.joinToString("  ·  ")),
-                            fontSize = 14.sp, lineHeight = 23.sp,
+                            fontSize = sz(14f), lineHeight = sz(23f),
                             fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
                         )

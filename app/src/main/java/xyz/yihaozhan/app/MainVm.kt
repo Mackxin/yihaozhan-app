@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.data.AppPayload
+import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
 
 class MainVm(app: Application) : AndroidViewModel(app) {
@@ -23,6 +24,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
 
     var ui by mutableStateOf(Ui())
         private set
+
+    private val prefs = Prefs.of(app)
 
     init {
         boot()
@@ -41,7 +44,9 @@ class MainVm(app: Application) : AndroidViewModel(app) {
                 booting = cache == null,
                 lastSync = Repo.lastSyncAt(ctx)
             )
-            pull()
+            /* 设置里关掉「打开时自动拉最新」就只在手动点同步时联网；
+               但手机里一份都没有时还是得联网一次，否则就是空壳 */
+            if (cache == null || prefs.autoSync) pull()
         }
     }
 

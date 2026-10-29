@@ -26,7 +26,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -62,35 +65,100 @@ fun openUrl(ctx: Context, url: String) {
     }
 }
 
-/** 页面标题区：大标题 + 一句说明，跟站点一个调子 */
+/**
+ * 页面标题区：标题、说明、一行小字全部居中；可选的左侧按钮（导航页的汉堡）和最右侧的齿轮。
+ *
+ * 为什么左右留 64dp：居中的文字要跟两边的图标错开，
+ * 不然「导航」这种短标题会跟汉堡挤在一起。两边留同样的宽度，视觉上还是正中。
+ */
 @Composable
-fun PageHeader(title: String, subtitle: String? = null, trailing: @Composable (() -> Unit)? = null) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 14.dp),
-        verticalAlignment = Alignment.Bottom
-    ) {
-        Column(Modifier.weight(1f)) {
+fun PageHeader(
+    title: String,
+    subtitle: String? = null,
+    meta: String? = null,
+    onSettings: (() -> Unit)? = null,
+    leading: @Composable (() -> Unit)? = null
+) {
+    Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 64.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(
                 title,
-                fontSize = 28.sp,
+                fontSize = 26.sp,
+                lineHeight = 34.sp,
                 fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onBackground
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(7.dp))
                 Text(
                     subtitle,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!meta.isNullOrBlank()) {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    meta,
+                    fontSize = 11.5.sp,
+                    textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-        if (trailing != null) {
-            Spacer(Modifier.width(12.dp))
-            trailing()
+        if (leading != null) {
+            Box(Modifier.align(Alignment.TopStart).padding(start = 6.dp)) { leading() }
+        }
+        if (onSettings != null) {
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 6.dp)) { GearButton(onSettings) }
+        }
+    }
+}
+
+/** 右上角齿轮：进设置页 */
+@Composable
+fun GearButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(42.dp)) {
+        Icon(
+            Icons.Rounded.Settings, "设置",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(21.dp)
+        )
+    }
+}
+
+/** 首页那种小标题 + 右侧「更多」 */
+@Composable
+fun SectionTitle(text: String, action: String? = null, onAction: (() -> Unit)? = null) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f)
+        )
+        if (action != null && onAction != null) {
+            Text(
+                action + " ›",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(99.dp))
+                    .clickable { onAction() }
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            )
         }
     }
 }
@@ -201,5 +269,24 @@ fun EmptyState(emoji: String, title: String, desc: String) {
             desc, fontSize = 13.sp, lineHeight = 21.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/** 数字统计格 */
+@Composable
+fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(vertical = 13.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            value, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(label, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
