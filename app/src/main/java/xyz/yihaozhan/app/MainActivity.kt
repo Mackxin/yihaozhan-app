@@ -142,6 +142,7 @@ private fun Failed(msg: String, onRetry: () -> Unit) {
         Text(
             msg,
             fontSize = 14.sp,
+            lineHeight = 22.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 14.dp)

@@ -68,7 +68,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
                     refreshing = false,
                     booting = false,
                     offline = !has || !Repo.online(ctx),
-                    error = if (has) null else "第一次打开需要联网一次"
+                    error = if (has) null
+                    else "第一次打开需要联网一次\n联上之后整站就存进手机了，以后没网也能看"
                 )
             }
         }
