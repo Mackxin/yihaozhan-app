@@ -222,7 +222,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
                 )
 
                 is MdBlock.Para -> Text(
-                    inlineMd(b.text), fontSize = sz(16f), lineHeight = sz(28f),
+                    inlineMd(b.text), fontSize = sz(15.5f), lineHeight = sz(30f),
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
@@ -238,7 +238,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
                             .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
                     )
                     Text(
-                        inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(26f),
+                        inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(29f),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp)
                     )
@@ -248,7 +248,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
                     b.items.forEach {
                         Row {
                             Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = sz(16f), lineHeight = sz(27f))
+                            Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
                         }
                     }
                 }
@@ -257,7 +257,7 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
                     b.items.forEachIndexed { idx, it ->
                         Row {
                             Text("${idx + 1}.", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = sz(16f), lineHeight = sz(27f))
+                            Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
                         }
                     }
                 }

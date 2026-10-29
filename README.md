@@ -82,7 +82,36 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 
 顶部所有页面的标题、说明、小字都是**居中**的，齿轮固定在右上角。
 
-## 四、代码结构
+## 四、外观：照抄站点手机版
+
+App 不是一套自创的 Material 皮肤，而是把站点 `assets/css/style.css` 里的设计变量搬了过来
+（见 `ui/Theme.kt` 的 `XyPal`）。改外观请先改站点那套变量，再同步这里，别单独发明颜色。
+
+| 站点变量 | App 里 | 深色 | 浅色 |
+|---|---|---|---|
+| `--bg` | `pal.bg` | `#05060B` | `#E8ECF7` |
+| `--glass` | `pal.glass`（卡片底） | `#0C0E18` | `#DBE3F5` |
+| `--text` | `pal.text` | `#EEF1F8` | `#0D1424` |
+| `--text-dim` | `pal.dim` | `#A7B0C4` | `#333D57` |
+| `--text-mute` | `pal.mute` | `#7B8496` | `#4E5878` |
+| `--a1/a2/a3` | `XY_A1/A2/A3`（渐变） | `#7C9CFF` `#B47CFF` `#4FE3D0` | 同值 |
+| `--ink-a1` | `pal.inkA1`（文字用强调色） | `#7C9CFF` | `#3B51B8` |
+| `--r-sm / --r / --r-lg` | `XyR.sm/md/lg` | 12 / 18 / 26 dp | 同值 |
+
+三条硬规矩（跟站点一致，别破坏）：
+
+1. **不用纯白**。卡片是「极淡的品牌蓝玻璃」，浅色主题也比页面底色略深一点点。
+2. **强调色分两套**：`XY_A1~A3` 只用于渐变和图形；当**文字/图标**颜色时一律用 `inkAN`，
+   浅色主题下把 `#7C9CFF` 直接当字色只有 2.2:1，等于隐形。
+3. **不用阴影、不用描边**，靠间距和留白分组；圆角只用三档。
+   渐变底上写字用深墨 `XY_INK`（`#080A12`），白字压在最浅的青色上只有 1.59:1。
+
+另外两处「站点感」是画出来的：
+
+- **极光背景**：`AuroraBackground` 用三个径向渐变画站点 `.bg__orb` 那三团光（左上蓝、右上紫、底部青），浅色主题整体减淡到 62%。
+- **悬浮药丸底栏**：站点手机端 `.dock` 是一颗浮起来的胶囊，App 也做成 54dp 的胶囊条，不是通到底的横栏。
+
+## 五、代码结构
 
 ```
 app/src/main/java/xyz/yihaozhan/app/
@@ -93,7 +122,7 @@ app/src/main/java/xyz/yihaozhan/app/
 │   ├── Prefs.kt             设置项（SharedPreferences + Compose 状态）
 │   └── Repo.kt              拉取 + 缓存读写 + 联网判断 + 清缓存
 └── ui/
-    ├── Theme.kt             浅色/深色配色，沉浸式状态栏
+    ├── Theme.kt             配色（照站点 CSS 变量）+ 极光背景 + 沉浸式状态栏
     ├── Markdown.kt          自己写的 Markdown 渲染（标题/列表/引用/代码/表格）
     ├── Common.kt            居中页头（带齿轮/汉堡位）、搜索框、标签、卡片、统计格
     ├── HomeScreen.kt        首页
@@ -109,7 +138,7 @@ app/src/main/java/xyz/yihaozhan/app/
 
 ---
 
-## 五、自己构建
+## 六、自己构建
 
 需要 JDK 17 和 Android SDK（`local.properties` 里的 `sdk.dir` 指向 SDK 路径）。
 

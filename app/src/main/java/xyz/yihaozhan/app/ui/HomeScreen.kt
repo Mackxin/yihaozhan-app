@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.FeedItem
@@ -125,6 +126,7 @@ fun HomeScreen(
 
 @Composable
 private fun Hero(data: AppPayload, onSettings: () -> Unit, offline: Boolean) {
+    val pal = LocalXyPal.current
     Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Column(
             Modifier
@@ -141,11 +143,12 @@ private fun Hero(data: AppPayload, onSettings: () -> Unit, offline: Boolean) {
             }
             Text(
                 data.site.name,
-                fontSize = 32.sp,
-                lineHeight = 40.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 34.sp,
+                lineHeight = 42.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.02).em,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onBackground
+                color = pal.text
             )
             if (data.site.slogan.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
@@ -200,10 +203,11 @@ private fun QuickCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val pal = LocalXyPal.current
     Row(
         modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(XyR.md.dp))
+            .background(pal.glass)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -212,10 +216,10 @@ private fun QuickCard(
             Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .background(pal.glassHi),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon(), null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(17.dp))
+            Icon(icon(), null, tint = pal.inkA1, modifier = Modifier.size(17.dp))
         }
         Spacer(Modifier.width(10.dp))
         Column {

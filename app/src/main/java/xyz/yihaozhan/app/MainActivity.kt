@@ -19,8 +19,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import xyz.yihaozhan.app.ui.AuroraBackground
+import xyz.yihaozhan.app.ui.LocalXyPal
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bolt
@@ -74,8 +80,11 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
             YiTheme(dark = dark) {
-                val vm: MainVm = viewModel()
-                AppRoot(vm, prefs)
+                /* 极光背景铺在最底下，整页（含状态栏、底栏后面）都是那三团光 */
+                AuroraBackground {
+                    val vm: MainVm = viewModel()
+                    AppRoot(vm, prefs)
+                }
             }
         }
     }
@@ -110,11 +119,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
+        containerColor = Color.Transparent,
         bottomBar = {
             /* 设置页和阅读页不显示底栏 */
             if (openPost == null && !showSettings) {
-                BottomTabs(tab) { tab = it }
+                BottomDock(tab) { tab = it }
             }
         }
     ) { pad ->
@@ -147,51 +157,55 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
 }
 
 /**
- * 底部标签栏：自己拼的，没用 NavigationBar。
- * NavigationBar 固定 80dp 高 + 顶部留白，五个 tab 显得特别占地方；这里压到 54dp。
+ * 底部标签栏：照站点手机端的 .dock —— 一颗**悬浮药丸**，不是一条通到底的横栏。
+ *
+ * 药丸贴边浮起来（radius 99 + 半透明底），视觉上比顶着屏幕底边的一条横栏轻得多，
+ * 高度也因此只有 ~52dp。药丸背后是页面底色，所以不影响极光透出来。
  */
 @Composable
-private fun BottomTabs(tab: Int, onPick: (Int) -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    Column(
+private fun BottomDock(tab: Int, onPick: (Int) -> Unit) {
+    val pal = LocalXyPal.current
+    Box(
         Modifier
             .fillMaxWidth()
-            .background(scheme.surface)
+            .navigationBarsPadding()
+            .padding(bottom = 10.dp, top = 6.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(0.6.dp)
-                .background(scheme.outline.copy(alpha = 0.45f))
-        )
         Row(
             Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .height(54.dp),
+                .clip(RoundedCornerShape(99.dp))
+                .background(pal.bgSoft.copy(alpha = 0.94f))
+                .padding(horizontal = 5.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TABS.forEachIndexed { i, t ->
                 val on = tab == i
-                val tint = if (on) scheme.primary else scheme.onSurfaceVariant
                 Column(
                     Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                        /* 固定宽度：不然选中项字重变粗会让整颗药丸左右微跳 */
+                        .width(58.dp)
+                        .clip(RoundedCornerShape(99.dp))
+                        .then(if (on) Modifier.background(pal.glassHi) else Modifier)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { onPick(i) },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        ) { onPick(i) }
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(t.icon, null, Modifier.size(19.dp), tint = tint)
+                    Icon(
+                        t.icon, null,
+                        Modifier.size(19.dp),
+                        tint = if (on) pal.inkA1 else pal.mute
+                    )
                     Spacer(Modifier.height(2.dp))
                     Text(
                         t.label,
-                        fontSize = 10.sp,
+                        fontSize = 9.5.sp,
                         fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                        color = tint
+                        color = if (on) pal.inkA1 else pal.mute
                     )
                 }
             }

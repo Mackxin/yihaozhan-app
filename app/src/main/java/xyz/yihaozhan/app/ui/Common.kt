@@ -37,11 +37,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 /** 打开外部链接：站内页也走浏览器（站点是 SPA，原生没法直接渲染后台那种页面） */
@@ -66,10 +69,9 @@ fun openUrl(ctx: Context, url: String) {
 }
 
 /**
- * 页面标题区：标题、说明、一行小字全部居中；可选的左侧按钮（导航页的汉堡）和最右侧的齿轮。
- *
- * 为什么左右留 64dp：居中的文字要跟两边的图标错开，
- * 不然「导航」这种短标题会跟汉堡挤在一起。两边留同样的宽度，视觉上还是正中。
+ * 页面标题区：跟站点 .page-head 一个规格 —— h1 30sp / 字重 800 / 字距 -0.02em，
+ * 说明行 13sp 次要色，小字 11.5sp 更淡一档；全部居中。
+ * 左右各留 64dp：短标题不会跟左上汉堡、右上齿轮挤在一起，居中也不偏。
  */
 @Composable
 fun PageHeader(
@@ -79,81 +81,85 @@ fun PageHeader(
     onSettings: (() -> Unit)? = null,
     leading: @Composable (() -> Unit)? = null
 ) {
-    Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp)) {
+    val pal = LocalXyPal.current
+    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 16.dp)) {
         Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 64.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 64.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 title,
-                fontSize = 26.sp,
-                lineHeight = 34.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 30.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.02).em,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onBackground
+                color = pal.text
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     subtitle,
                     fontSize = 13.sp,
-                    lineHeight = 20.sp,
+                    lineHeight = 21.sp,
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = pal.dim
                 )
             }
             if (!meta.isNullOrBlank()) {
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     meta,
                     fontSize = 11.5.sp,
+                    letterSpacing = 0.02.em,
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = pal.mute
                 )
             }
         }
         if (leading != null) {
-            Box(Modifier.align(Alignment.TopStart).padding(start = 6.dp)) { leading() }
+            Box(Modifier.align(Alignment.TopStart).padding(start = 4.dp)) { leading() }
         }
         if (onSettings != null) {
-            Box(Modifier.align(Alignment.TopEnd).padding(end = 6.dp)) { GearButton(onSettings) }
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 4.dp)) { GearButton(onSettings) }
         }
     }
 }
 
-/** 右上角齿轮：进设置页 */
+/** 右上角齿轮：站点 .icon-btn 的样子 —— 38dp 高、玻璃底、圆角 12 */
 @Composable
 fun GearButton(onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(42.dp)) {
+    val pal = LocalXyPal.current
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
         Icon(
             Icons.Rounded.Settings, "设置",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(21.dp)
+            tint = pal.dim,
+            modifier = Modifier.size(20.dp)
         )
     }
 }
 
-/** 首页那种小标题 + 右侧「更多」 */
+/** 小标题 + 右侧「更多」 */
 @Composable
 fun SectionTitle(text: String, action: String? = null, onAction: (() -> Unit)? = null) {
+    val pal = LocalXyPal.current
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.01).em,
+            color = pal.text,
             modifier = Modifier.weight(1f)
         )
         if (action != null && onAction != null) {
             Text(
                 action + " ›",
                 fontSize = 12.5.sp,
-                color = MaterialTheme.colorScheme.primary,
+                color = pal.inkA1,
                 modifier = Modifier
                     .clip(RoundedCornerShape(99.dp))
                     .clickable { onAction() }
@@ -163,7 +169,7 @@ fun SectionTitle(text: String, action: String? = null, onAction: (() -> Unit)? =
     }
 }
 
-/** 搜索框：只用 BasicTextField 自绘，省掉 TextField 那一圈厚内边距 */
+/** 搜索框：只用 BasicTextField 自绘，玻璃底 + 全圆角（站点 .searchbox 的样子） */
 @Composable
 fun SearchField(
     value: String,
@@ -171,83 +177,91 @@ fun SearchField(
     placeholder: String,
     modifier: Modifier = Modifier
 ) {
+    val pal = LocalXyPal.current
     Row(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(99.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .background(pal.glass)
+            .padding(horizontal = 15.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             Icons.Rounded.Search, null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
+            tint = pal.mute,
+            modifier = Modifier.size(17.dp)
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(9.dp))
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) {
-                Text(
-                    placeholder, fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(placeholder, fontSize = 13.5.sp, color = pal.mute)
             }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
                 singleLine = true,
-                textStyle = LocalTextStyle.current.copy(
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onBackground
-                ),
+                textStyle = LocalTextStyle.current.copy(fontSize = 13.5.sp, color = pal.text),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = {}),
                 modifier = Modifier.fillMaxWidth()
             )
         }
         if (value.isNotEmpty()) {
-            Icon(
-                Icons.Rounded.Close, "清空",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(CircleShape)
-                    .clickable { onValueChange("") }
-            )
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(pal.glassHi)
+                    .clickable { onValueChange("") },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Close, "清空", tint = pal.mute, modifier = Modifier.size(13.dp))
+            }
         }
     }
 }
 
-/** 标签胶囊 */
+/**
+ * 胶囊：站点 .pill / .tag。
+ * 选中态用站点 .head-toggle[aria-pressed=true] 那套 —— 渐变底 + 深墨字，
+ * 不用白字（白字压在最浅的青色上只有 1.59:1）。
+ */
 @Composable
 fun TagChip(text: String, onClick: (() -> Unit)? = null, active: Boolean = false) {
-    val bg = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val pal = LocalXyPal.current
     Text(
         text,
-        fontSize = 12.sp,
-        color = fg,
+        fontSize = 12.5.sp,
+        fontWeight = FontWeight.Medium,
+        color = if (active) XY_INK else pal.dim,
         modifier = Modifier
             .clip(RoundedCornerShape(99.dp))
-            .background(bg)
+            .then(
+                if (active) Modifier.background(pal.grad())
+                else Modifier.background(pal.glass)
+            )
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 5.dp)
     )
 }
 
-/** 卡片外壳 */
+/** 卡片外壳：玻璃底、圆角 26（站点 --r-lg）、不描边、不投影 */
 @Composable
 fun CardBox(
     modifier: Modifier = Modifier,
-    padding: PaddingValues = PaddingValues(16.dp),
+    padding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
+    /* 列表条目默认透明：站点 .feed-card 就是 background:none，
+       靠留白分组。也给里面的标签胶囊留出能看清的底。 */
+    glass: Boolean = true,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    val pal = LocalXyPal.current
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(XyR.lg.dp))
+            .background(if (glass) pal.glass else Color.Transparent)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(padding)
     ) { content() }
@@ -256,6 +270,7 @@ fun CardBox(
 /** 空状态 */
 @Composable
 fun EmptyState(emoji: String, title: String, desc: String) {
+    val pal = LocalXyPal.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -264,29 +279,48 @@ fun EmptyState(emoji: String, title: String, desc: String) {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(emoji, fontSize = 34.sp)
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = pal.text)
+        Text(desc, fontSize = 13.sp, lineHeight = 21.sp, color = pal.dim)
+    }
+}
+
+/**
+ * 数字统计格：站点 .head-stat —— 玻璃底、圆角 16、数字 25sp/800 且是**渐变文字**，
+ * 下面一行 12sp 更淡的说明。渐变色只铺数字那么宽，横向拉太长会糊成一片紫。
+ */
+@Composable
+fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
+    val pal = LocalXyPal.current
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(pal.glass)
+            .padding(horizontal = 18.dp, vertical = 13.dp)
+    ) {
         Text(
-            desc, fontSize = 13.sp, lineHeight = 21.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            value,
+            style = TextStyle(
+                brush = pal.gradText(180f),
+                fontSize = 25.sp,
+                lineHeight = 29.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.02).em
+            )
+        )
+        Spacer(Modifier.height(1.dp))
+        Text(
+            label, fontSize = 12.sp, letterSpacing = 0.02.em, color = pal.mute
         )
     }
 }
 
-/** 数字统计格 */
+/** 细分隔线：站点不用描边，需要分块时才画一条极淡的线 */
 @Composable
-fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
-    Column(
+fun HairLine(modifier: Modifier = Modifier) {
+    Box(
         modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(vertical = 13.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            value, fontSize = 19.sp, fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(label, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(LocalXyPal.current.outline)
+    )
 }

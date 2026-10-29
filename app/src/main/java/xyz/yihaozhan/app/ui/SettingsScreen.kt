@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.Prefs
@@ -69,8 +71,9 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
         Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp)) {
             Text(
                 "设置",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.01).em,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.align(Alignment.Center).fillMaxWidth()
             )
@@ -255,9 +258,10 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
 private fun GroupTitle(text: String) {
     Text(
         text,
-        fontSize = 12.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        letterSpacing = 0.18.em,
+        color = LocalXyPal.current.mute,
         modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp)
     )
 }
@@ -267,9 +271,9 @@ private fun SettingCard(content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 14.dp, vertical = 14.dp)
+            .clip(RoundedCornerShape(XyR.md.dp))
+            .background(LocalXyPal.current.glass)
+            .padding(horizontal = 15.dp, vertical = 15.dp)
     ) { content() }
 }
 
@@ -281,11 +285,12 @@ private fun Segmented(
     compact: Boolean = false,
     onPick: (Int) -> Unit
 ) {
+    val pal = LocalXyPal.current
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(99.dp))
+            .background(pal.glass)
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
@@ -294,11 +299,8 @@ private fun Segmented(
             Row(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (on) MaterialTheme.colorScheme.primary
-                        else androidx.compose.ui.graphics.Color.Transparent
-                    )
+                    .clip(RoundedCornerShape(99.dp))
+                    .then(if (on) Modifier.background(pal.grad()) else Modifier)
                     .clickable { onPick(i) }
                     .padding(vertical = if (compact) 7.dp else 9.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -307,7 +309,7 @@ private fun Segmented(
                 if (on && !compact) {
                     Icon(
                         Icons.Rounded.Check, null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = XY_INK,
                         modifier = Modifier.size(13.dp)
                     )
                     Spacer(Modifier.width(3.dp))
@@ -317,8 +319,7 @@ private fun Segmented(
                     fontSize = if (compact) 11.5.sp else 12.5.sp,
                     fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
-                    color = if (on) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (on) XY_INK else pal.dim
                 )
             }
         }

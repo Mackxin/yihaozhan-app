@@ -139,7 +139,12 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
 
 @Composable
 private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit) {
-    CardBox(onClick = if (f.url.isNotBlank()) ({ onOpen(f.url) }) else null) {
+    /* 跟站点一样不铺底色：条目靠留白分开，标签胶囊直接浮在极光上 */
+    CardBox(
+        padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+        glass = false,
+        onClick = if (f.url.isNotBlank()) ({ onOpen(f.url) }) else null
+    ) {
         Row(verticalAlignment = Alignment.Top) {
             Text(f.icon.ifBlank { "•" }, fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
             Column(Modifier.weight(1f)) {
@@ -192,7 +197,11 @@ fun PostsScreen(data: AppPayload, onOpen: (Post) -> Unit, onSettings: () -> Unit
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(posts, key = { it.id }) { p ->
-                    CardBox(onClick = { onOpen(p) }) {
+                    CardBox(
+                        padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+                        glass = false,
+                        onClick = { onOpen(p) }
+                    ) {
                         Text(p.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
                         if (p.excerpt.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
@@ -441,8 +450,8 @@ private fun LinkCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(XyR.md.dp))
+            .background(LocalXyPal.current.glass)
             .padding(horizontal = 12.dp, vertical = 12.dp)
     ) {
         Row(
