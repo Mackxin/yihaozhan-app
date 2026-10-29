@@ -1,7 +1,12 @@
 package xyz.yihaozhan.app.ui
 
 import android.app.Activity
-import androidx.compose.foundation.Canvas
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -14,12 +19,22 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntSize
 import androidx.core.view.WindowCompat
 
 /**
@@ -176,33 +191,63 @@ fun YiTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Un
  * 页面底色不是一块死板的纯色，左上偏蓝、右上偏紫、底部偏青，
  * 三团柔和的光叠在一起 —— 站点「悬浮在夜色里」的感觉全靠这层。
  * 用径向渐变画，不需要真的模糊，渐变边缘本身就是软的。
+ *
+ * 性能：**烘成一张 1/4 分辨率的小图再拉伸**，不是每帧现算三个全屏径向渐变。
+ * 滑页时这层会被整块重绘，现算的话三张大渐变光栅化就是掉帧主因；
+ * 而径向渐变是低频信息，缩到 1/4 再放回去肉眼看不出差别。
  */
 @Composable
 fun AuroraBackground(content: @Composable BoxScope.() -> Unit) {
     val pal = LocalXyPal.current
-    Box(Modifier.fillMaxSize().background(pal.bg)) {
-        Canvas(Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            /* 浅色主题光晕更淡（站点 html[data-theme="light"] .bg__orb{opacity:.28}） */
-            val k = if (pal.dark) 1f else 0.62f
-
-            fun glow(cx: Float, cy: Float, r: Float, c: Color, a: Float) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(c.copy(alpha = a * k), Color.Transparent),
-                        center = Offset(cx, cy),
-                        radius = r
-                    ),
-                    radius = r,
-                    center = Offset(cx, cy)
-                )
-            }
-
-            glow(w * 0.16f, h * 0.02f, w * 0.72f, XY_A1, 0.34f)   // 左上：蓝
-            glow(w * 0.96f, h * 0.15f, w * 0.62f, XY_A2, 0.30f)   // 右上：紫
-            glow(w * 0.50f, h * 0.98f, w * 0.70f, XY_A3, 0.22f)   // 底部：青
+    var box by remember { mutableStateOf(IntSize.Zero) }
+    val aurora = remember(box, pal) {
+        if (box.width <= 0 || box.height <= 0) null else bakeAurora(box, pal)
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(pal.bg)
+            .onSizeChanged { box = it }
+    ) {
+        if (aurora != null) {
+            Image(
+                bitmap = aurora,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.FillBounds
+            )
         }
         content()
     }
+}
+
+/** 画一张极光小图。参数和原来那三个 glow() 保持一致，只是画在离屏画布上。 */
+private fun bakeAurora(size: IntSize, pal: XyPal): ImageBitmap {
+    val scale = 0.25f
+    val w = (size.width * scale).toInt().coerceAtLeast(1)
+    val h = (size.height * scale).toInt().coerceAtLeast(1)
+    /* 浅色主题光晕更淡（站点 html[data-theme="light"] .bg__orb{opacity:.28}） */
+    val k = if (pal.dark) 1f else 0.62f
+
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bmp)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    fun glow(cx: Float, cy: Float, r: Float, c: Color, a: Float) {
+        val argb = c.toArgb()
+        val solid = (255 * a * k).toInt().coerceIn(0, 255) shl 24 or (argb and 0x00FFFFFF)
+        paint.shader = RadialGradient(
+            cx, cy, r, intArrayOf(solid, 0x00000000), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
+        )
+        /* 铺满整张，半径外那圈由渐变自己收敛成透明 */
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+    }
+
+    val wf = w.toFloat()
+    val hf = h.toFloat()
+    glow(wf * 0.16f, hf * 0.02f, wf * 0.72f, XY_A1, 0.34f)   // 左上：蓝
+    glow(wf * 0.96f, hf * 0.15f, wf * 0.62f, XY_A2, 0.30f)   // 右上：紫
+    glow(wf * 0.50f, hf * 0.98f, wf * 0.70f, XY_A3, 0.22f)   // 底部：青
+    paint.shader = null
+    return bmp.asImageBitmap()
 }

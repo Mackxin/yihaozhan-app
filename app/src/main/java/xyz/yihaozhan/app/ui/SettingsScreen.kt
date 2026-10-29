@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -45,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
+import xyz.yihaozhan.app.tabLabel
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
 
@@ -148,6 +151,86 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
                         selected = prefs.startTab,
                         compact = true
                     ) { prefs.updateStartTab(it) }
+                }
+            }
+
+            /* ---------------- 底部标签栏 ---------------- */
+            item { GroupTitle("底部标签栏") }
+            item {
+                SettingCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("显示图标", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "默认关：只留文字，底栏更矮",
+                                fontSize = 11.5.sp,
+                                color = LocalXyPal.current.mute
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = prefs.dockIcons, onCheckedChange = { prefs.updateDockIcons(it) })
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    HairLine()
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "排序与显示",
+                        fontSize = 12.5.sp,
+                        color = LocalXyPal.current.mute
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    prefs.tabsInOrder.forEachIndexed { idx, id ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                tabLabel(id),
+                                fontSize = 13.5.sp,
+                                fontWeight = if (id in prefs.hiddenSet) FontWeight.Normal else FontWeight.Medium,
+                                color = if (id in prefs.hiddenSet) LocalXyPal.current.mute
+                                else LocalXyPal.current.text,
+                                modifier = Modifier.weight(1f)
+                            )
+                            /* 上下移：顺序就是底栏从左到右 */
+                            IconButton(
+                                onClick = { prefs.moveTab(id, -1) },
+                                enabled = idx > 0,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.KeyboardArrowUp, "上移",
+                                    tint = if (idx > 0) LocalXyPal.current.dim else LocalXyPal.current.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { prefs.moveTab(id, 1) },
+                                enabled = idx < prefs.tabsInOrder.lastIndex,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.KeyboardArrowDown, "下移",
+                                    tint = if (idx < prefs.tabsInOrder.lastIndex) LocalXyPal.current.dim
+                                    else LocalXyPal.current.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Switch(
+                                checked = id !in prefs.hiddenSet,
+                                enabled = prefs.canHide(id),
+                                onCheckedChange = { prefs.setTabHidden(id, !it) }
+                            )
+                        }
+                    }
+                    Text(
+                        "至少留一个，最后一个的开关会锁住",
+                        fontSize = 11.sp,
+                        color = LocalXyPal.current.mute,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
 

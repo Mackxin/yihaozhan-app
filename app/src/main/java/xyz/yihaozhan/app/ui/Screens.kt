@@ -1,7 +1,11 @@
 package xyz.yihaozhan.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.activity.compose.BackHandler
@@ -31,18 +35,15 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,7 +58,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.FeedItem
@@ -295,19 +295,16 @@ fun PostDetailScreen(
 
 /* ============================ 导航 ============================ */
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     var q by remember { mutableStateOf("") }
     var catId by remember { mutableStateOf("") }
+    var catOpen by remember { mutableStateOf(false) }
 
+    val pal = LocalXyPal.current
     val cats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
     val activeCat = remember(catId, cats) { cats.firstOrNull { it.id == catId } }
-    val drawer = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
-
-    /* 抽屉开着时返回键先关抽屉 —— 不拦这一下，按返回会直接把 App 退出 */
-    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
 
     val flat = remember(catId, q, cats) {
         val src = if (activeCat != null) listOf(activeCat) else cats
@@ -322,45 +319,10 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawer,
-        drawerContent = {
-            ModalDrawerSheet(Modifier.width(292.dp)) {
-                Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp)) {
-                    Text("分类", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                LazyColumn(Modifier.fillMaxSize()) {
-                    item {
-                        DrawerRow(
-                            icon = "🗂", name = "全部",
-                            count = data.stats.links,
-                            selected = catId.isEmpty()
-                        ) {
-                            catId = ""
-                            scope.launch { drawer.close() }
-                        }
-                    }
-                    items(cats, key = { "d" + it.id }) { c ->
-                        DrawerRow(
-                            icon = c.icon.ifBlank { "•" },
-                            name = c.name,
-                            count = c.links.size,
-                            selected = catId == c.id
-                        ) {
-                            catId = c.id
-                            scope.launch { drawer.close() }
-                        }
-                    }
-                }
-            }
-        }
-    ) {
+    /* 抽屉开着时返回键先关抽屉 —— 不拦这一下，按返回会把 App 退出 */
+    BackHandler(enabled = catOpen) { catOpen = false }
+
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             PageHeader(
                 "导航",
@@ -368,8 +330,8 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                 meta = "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
                 onSettings = onSettings,
                 leading = {
-                    IconButton(onClick = { scope.launch { drawer.open() } }) {
-                        Icon(Icons.Rounded.Menu, "分类", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    IconButton(onClick = { catOpen = true }) {
+                        Icon(Icons.Rounded.Menu, "分类", tint = pal.dim)
                     }
                 }
             )
@@ -384,10 +346,7 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                     TagChip("${activeCat.icon} ${activeCat.name}".trim(), { catId = "" }, active = true)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(
-                    "${flat.size} 个",
-                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("${flat.size} 个", fontSize = 11.5.sp, color = pal.mute)
             }
             if (flat.isEmpty()) {
                 EmptyState("🔍", "没找到", "换个关键词试试。")
@@ -409,34 +368,111 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                 }
             }
         }
+
+        /*
+         * 分类抽屉自己做，不用 ModalNavigationDrawer：
+         * 它默认「整屏任意横向拖动都能拉开」，正好跟左右翻页抢手势 —— 划一下页面抽屉就被拽出来。
+         * 自己画一层浮层，只认汉堡按钮，手势干干净净。
+         */
+        if (catOpen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.30f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { catOpen = false }
+            )
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(312.dp),
+                color = pal.bgSoft,
+                shadowElevation = 0.dp
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 12.dp)) {
+                        Text(
+                            "分类", fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                            color = pal.text
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
+                            fontSize = 12.sp, color = pal.mute
+                        )
+                    }
+                    HairLine()
+                    /* 一行摆好几个：五十个分类竖成一列要滑半天，挤成小胶囊一屏扫完，也不用滚动条 */
+                    FlowRow(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CatChip("🗂", "全部", data.stats.links, catId.isEmpty()) {
+                            catId = ""
+                            catOpen = false
+                        }
+                        cats.forEach { c ->
+                            CatChip(c.icon, c.name, c.links.size, catId == c.id) {
+                                catId = c.id
+                                catOpen = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
+/**
+ * 抽屉里的分类胶囊：图标 + 名字 + 站点数。
+ * 选中的用站点那条渐变当底，字压深墨（白字在最浅的青色上只有 1.59:1）。
+ */
 @Composable
-private fun DrawerRow(icon: String, name: String, count: Int, selected: Boolean, onClick: () -> Unit) {
-    NavigationDrawerItem(
-        label = {
-            Text(
-                name, fontSize = 14.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
+private fun CatChip(
+    icon: String,
+    name: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .then(
+                if (selected) Modifier.background(pal.grad())
+                else Modifier.background(pal.glass)
             )
-        },
-        icon = { Text(icon, fontSize = 16.sp) },
-        badge = {
-            Text(
-                "$count", fontSize = 11.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        },
-        selected = selected,
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = NavigationDrawerItemDefaults.colors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        modifier = Modifier.padding(horizontal = 10.dp, vertical = 1.dp)
-    )
+            .clickable { onClick() }
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon.isNotBlank()) {
+            Text(icon, fontSize = 11.5.sp)
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            name,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            color = if (selected) XY_INK else pal.dim
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            "$count",
+            fontSize = 10.sp,
+            color = if (selected) XY_INK.copy(alpha = 0.72f) else pal.mute
+        )
+    }
 }
 
 /** 导航卡片：竖着排，图标 + 名字 + 描述，高度自然跟着内容变 */
