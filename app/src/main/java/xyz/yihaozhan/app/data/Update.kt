@@ -144,8 +144,11 @@ object UpdateRepo {
     fun onWifi(ctx: Context): Boolean = runCatching {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return@runCatching false
+        /* VPN 也算：开着代理时系统报的是 TRANSPORT_VPN，底层多半还是 Wi-Fi，
+           只认 WIFI 会把一大半人挡在门外，还看不出为什么 */
         caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     }.getOrDefault(false)
 
     /** 系统允许这个 App 安装别的应用吗（Android 8+ 要用户手动开一次） */
