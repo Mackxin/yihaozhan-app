@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.tabLabel
+import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
 import xyz.yihaozhan.app.data.UpdateRepo
@@ -63,7 +64,7 @@ import kotlin.math.roundToInt
  * 启动页下次打开生效，清缓存真的删文件。没有摆设开关。
  */
 @Composable
-fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit) {
+fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Local) {
     val ui = vm.ui
     val data = ui.data
     val ctx = LocalContext.current
@@ -136,6 +137,14 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit) {
                         lineHeight = (24 * prefs.fontScale).sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.height(12.dp))
+                    HairLine()
+                    Spacer(Modifier.height(10.dp))
+                    SwitchRow(
+                        title = "记住读到哪里",
+                        desc = "每篇各记各的，下次点进去接着读（关掉就每次都从开头）",
+                        checked = prefs.rememberPos
+                    ) { prefs.updateRememberPos(it) }
                 }
             }
 
@@ -189,7 +198,7 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit) {
                     )
                     Spacer(Modifier.height(10.dp))
                     Segmented(
-                        options = listOf("首页", "分享", "文章", "导航", "设置"),
+                        options = listOf("首页", "分享", "文章", "导航", "设置", "收藏"),
                         selected = prefs.startTab,
                         compact = true
                     ) { prefs.updateStartTab(it) }
@@ -286,6 +295,54 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit) {
                                 Toast.LENGTH_SHORT
                             ).show()
                         }) { Text("清除", fontSize = 13.sp) }
+                    }
+                }
+            }
+
+            /* ---------------- 本机数据 ---------------- */
+            item { GroupTitle("本机数据") }
+            item {
+                SettingCard {
+                    Text(
+                        "只存在这台手机里，不上传、不同步。",
+                        fontSize = 11.5.sp, color = LocalXyPal.current.mute
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    InfoRow("收藏 / 稍后读", "${local.fav.size} / ${local.later.size} 篇")
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("阅读记录", fontSize = 13.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${local.posCount} 篇记着读到哪了",
+                                fontSize = 11.sp, color = LocalXyPal.current.mute
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                local.clearPositions()
+                                Toast.makeText(ctx, "已清空阅读记录", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = local.posCount > 0
+                        ) { Text("清除", fontSize = 13.sp) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("最近打开", fontSize = 13.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${local.recents.size} 个站点",
+                                fontSize = 11.sp, color = LocalXyPal.current.mute
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                local.clearRecents()
+                                Toast.makeText(ctx, "已清空最近打开", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = local.recents.isNotEmpty()
+                        ) { Text("清除", fontSize = 13.sp) }
                     }
                 }
             }

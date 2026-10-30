@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.data.Post
+import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AuroraBackground
@@ -75,6 +77,7 @@ import xyz.yihaozhan.app.ui.PostDetailScreen
 import xyz.yihaozhan.app.ui.PullRefresh
 import xyz.yihaozhan.app.ui.UpdateDialog
 import xyz.yihaozhan.app.ui.PostsScreen
+import xyz.yihaozhan.app.ui.SavedScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
 import xyz.yihaozhan.app.ui.YiTheme
@@ -96,7 +99,7 @@ class MainActivity : ComponentActivity() {
                 /* 极光背景铺在最底下，整页（含状态栏、底栏后面）都是那三团光 */
                 AuroraBackground {
                     val vm: MainVm = viewModel()
-                    AppRoot(vm, prefs)
+                    AppRoot(vm, prefs, dark)
                 }
             }
         }
@@ -111,15 +114,19 @@ private val TABS = listOf(
     Tab(1, "分享", Icons.Rounded.Bolt),
     Tab(2, "文章", Icons.AutoMirrored.Rounded.MenuBook),
     Tab(3, "导航", Icons.Rounded.GridView),
-    Tab(4, "设置", Icons.Rounded.Settings)
+    Tab(4, "设置", Icons.Rounded.Settings),
+    /* 1.8 新加的一页：收藏 + 稍后读。id 5，老设置里没有会自动补到末尾 */
+    Tab(5, "收藏", Icons.Rounded.StarBorder)
 )
 
 fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun AppRoot(vm: MainVm, prefs: Prefs) {
+private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     val context = LocalContext.current
+    /* 收藏 / 稍后读 / 最近打开 / 读到哪：本机数据，一份单例 */
+    val local = remember { Local.of(context) }
     val ui = vm.ui
     /* 只在设置里改过顺序/显隐时才重算：visibleTabs 是 getter，
        不 remember 的话每次重组都新造一个 List，底栏和无障碍树跟着白刷一遍。 */
@@ -221,9 +228,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
             when {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
-                webUrl != null -> WebScreen(webUrl!!, { webUrl = null }, external)
+                webUrl != null -> WebScreen(webUrl!!, { webUrl = null }, external, dark)
                 openPost != null -> PostDetailScreen(
-                    openPost!!, { openPost = null }, open, prefs.fontScale
+                    openPost!!, { openPost = null }, open, prefs.fontScale,
+                    local = local, rememberPos = prefs.rememberPos
                 )
                 /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
                 else -> PullRefresh(
@@ -248,8 +256,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
                             )
                             1 -> FeedScreen(data, open) { goTab(4) }
                             2 -> PostsScreen(data, { openPost = it }) { goTab(4) }
-                            3 -> LinksScreen(data, open, { goTab(4) }, prefs.navCollapsed)
-                            else -> SettingsScreen(prefs, vm, open)
+                            3 -> LinksScreen(
+                                data, open, { goTab(4) }, prefs.navCollapsed, local
+                            )
+                            5 -> SavedScreen(
+                                data.posts, local,
+                                onOpenPost = { openPost = it },
+                                onSettings = { goTab(4) }
+                            )
+                            else -> SettingsScreen(prefs, vm, open, local)
                         }
                     }
                 }

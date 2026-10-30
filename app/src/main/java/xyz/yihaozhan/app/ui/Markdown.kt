@@ -197,100 +197,114 @@ fun inlineMd(src: String): AnnotatedString = buildAnnotatedString {
     }
 }
 
+/**
+ * 整篇渲染：把解析出来的块一次性铺成一个 Column。
+ * 用在不需要「跳到某一节」的地方；文章详情页走 `MdBlockView` 一块一个 item，
+ * 这样点目录才能精确滚到那一段。
+ */
 @Composable
 fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1f) {
     val blocks = parseMarkdown(md)
+    Column(
+        modifier.fillMaxWidth(),
+        /* 段间距也跟着字号缩放：光放大字、间距不动，大字会挤成一坨 */
+        verticalArrangement = Arrangement.spacedBy((10 * fontScale).dp)
+    ) {
+        blocks.forEach { MdBlockView(it, fontScale) }
+    }
+}
+
+/** 单独渲染一个块。文章详情页拿它当 LazyColumn 的 item，目录才跳得准 */
+@Composable
+fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
     val mono = FontFamily.Monospace
     /* 字号倍数来自设置页；行高一起放大，不然大字会挤在一起 */
     fun sz(v: Float) = (v * fontScale).sp
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        blocks.forEach { b ->
-            when (b) {
-                is MdBlock.Heading -> Text(
-                    inlineMd(b.text),
-                    fontSize = sz(
-                        when (b.level) {
-                            1 -> 24f
-                            2 -> 21f
-                            3 -> 18f
-                            else -> 16f
-                        }
-                    ),
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = sz(30f),
-                    modifier = Modifier.padding(top = if (b.level <= 2) 8.dp else 4.dp)
+
+    when (b) {
+        is MdBlock.Heading -> Text(
+            inlineMd(b.text),
+            fontSize = sz(
+                when (b.level) {
+                    1 -> 24f
+                    2 -> 21f
+                    3 -> 18f
+                    else -> 16f
+                }
+            ),
+            fontWeight = FontWeight.Bold,
+            lineHeight = sz(30f),
+            modifier = Modifier.padding(top = if (b.level <= 2) 8.dp else 4.dp)
+        )
+
+        is MdBlock.Para -> Text(
+            inlineMd(b.text), fontSize = sz(15.5f), lineHeight = sz(30f),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        is MdBlock.Quote -> Row(
+            Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+            )
+            Text(
+                inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(29f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 12.dp)
+            )
+        }
+
+        is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            b.items.forEach {
+                Row {
+                    Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
+                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
+                }
+            }
+        }
+
+        is MdBlock.Numbers -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            b.items.forEachIndexed { idx, it ->
+                Row {
+                    Text("${idx + 1}.", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
+                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
+                }
+            }
+        }
+
+        is MdBlock.Code -> Text(
+            b.code,
+            fontFamily = mono, fontSize = sz(13f), lineHeight = sz(21f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    RoundedCornerShape(12.dp)
                 )
+                .padding(14.dp)
+        )
 
-                is MdBlock.Para -> Text(
-                    inlineMd(b.text), fontSize = sz(15.5f), lineHeight = sz(30f),
-                    color = MaterialTheme.colorScheme.onBackground
+        /* 表格在手机上横向铺不开，改成「一行一条、格子用 · 隔开」。
+           文章里那张表只有两三列，这样读反而比横向滚动舒服。 */
+        is MdBlock.Table -> Column(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                .padding(vertical = 6.dp)
+        ) {
+            b.rows.forEachIndexed { idx, row ->
+                Text(
+                    inlineMd(row.joinToString("  ·  ")),
+                    fontSize = sz(14f), lineHeight = sz(23f),
+                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
                 )
-
-                is MdBlock.Quote -> Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min)
-                ) {
-                    Box(
-                        Modifier
-                            .width(3.dp)
-                            .fillMaxHeight()
-                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-                    )
-                    Text(
-                        inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(29f),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 12.dp)
-                    )
-                }
-
-                is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    b.items.forEach {
-                        Row {
-                            Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
-                        }
-                    }
-                }
-
-                is MdBlock.Numbers -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    b.items.forEachIndexed { idx, it ->
-                        Row {
-                            Text("${idx + 1}.", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                            Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
-                        }
-                    }
-                }
-
-                is MdBlock.Code -> Text(
-                    b.code,
-                    fontFamily = mono, fontSize = sz(13f), lineHeight = sz(21f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(12.dp)
-                        )
-                        .padding(14.dp)
-                )
-
-                /* 表格在手机上横向铺不开，改成「一行一条、格子用 · 隔开」。
-                   文章里那张表只有两三列，这样读反而比横向滚动舒服。 */
-                is MdBlock.Table -> Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                        .padding(vertical = 6.dp)
-                ) {
-                    b.rows.forEachIndexed { idx, row ->
-                        Text(
-                            inlineMd(row.joinToString("  ·  ")),
-                            fontSize = sz(14f), lineHeight = sz(23f),
-                            fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
-                        )
-                    }
-                }
             }
         }
     }

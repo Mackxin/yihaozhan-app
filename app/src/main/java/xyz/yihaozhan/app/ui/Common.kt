@@ -61,6 +61,25 @@ fun rememberOpener(): (String) -> Unit {
     }
 }
 
+/**
+ * 走系统分享面板把一段文字发出去（微信、备忘录、邮箱都行）。
+ * 用 createChooser 而不是裸 ACTION_SEND：有些机型不包 chooser 会直接记住上次那个应用，
+ * 想换一个反而没地方换。
+ */
+fun shareText(ctx: Context, text: String) {
+    try {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        ctx.startActivity(
+            Intent.createChooser(send, "分享到").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "没有能分享的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
 fun openUrl(ctx: Context, url: String) {
     try {
         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {

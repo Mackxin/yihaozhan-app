@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,8 +63,14 @@ import kotlinx.coroutines.delay
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebScreen(url: String, onBack: () -> Unit, onOpenExternal: (String) -> Unit) {
+fun WebScreen(
+    url: String,
+    onBack: () -> Unit,
+    onOpenExternal: (String) -> Unit,
+    dark: Boolean = true
+) {
     val ctx = LocalContext.current
+    val pal = LocalXyPal.current
     var progress by remember { mutableStateOf(0f) }
     var currentUrl by remember { mutableStateOf(url) }
     var pageTitle by remember { mutableStateOf("") }
@@ -96,6 +103,14 @@ fun WebScreen(url: String, onBack: () -> Unit, onOpenExternal: (String) -> Unit)
                     progress = 1f
                     if (u != null) currentUrl = u
                     pageTitle = view?.title.orEmpty()
+                    /* 把 App 的主题告诉网页：壹号栈自己认 data-theme，
+                       这样「App 浅色 + 点开一片黑」的翻面就没了。
+                       别的站不认这个属性，注入一下也无害。 */
+                    view?.evaluateJavascript(
+                        "(function(){try{document.documentElement.dataset.theme='" +
+                            (if (dark) "dark" else "light") + "';}catch(e){}})()",
+                        null
+                    )
                 }
 
                 override fun onReceivedError(
@@ -113,6 +128,8 @@ fun WebScreen(url: String, onBack: () -> Unit, onOpenExternal: (String) -> Unit)
                     progress = newProgress / 100f
                 }
             }
+            /* 底色先跟 App 对齐：不然浅色模式点开网页会白闪一下 */
+            setBackgroundColor(pal.bg.toArgb())
             loadUrl(url)
         }
     }

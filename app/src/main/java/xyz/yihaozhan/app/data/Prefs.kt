@@ -30,8 +30,8 @@ class Prefs private constructor(ctx: Context) {
     var autoSync by mutableStateOf(sp.getBoolean("autoSync", true))
         private set
 
-    /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 关于） */
-    var startTab by mutableStateOf(sp.getInt("startTab", 0).coerceIn(0, 4))
+    /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 设置 / 5 收藏） */
+    var startTab by mutableStateOf(sp.getInt("startTab", 0).coerceIn(0, LAST_TAB))
         private set
 
     /** 底栏显示图标？默认关 —— 只留文字，药丸更矮更轻 */
@@ -62,6 +62,10 @@ class Prefs private constructor(ctx: Context) {
     var navCollapsed by mutableStateOf(sp.getBoolean("navCollapsed", false))
         private set
 
+    /** 记住每篇文章读到哪里，下次点进去接着读 */
+    var rememberPos by mutableStateOf(sp.getBoolean("rememberPos", true))
+        private set
+
     fun updateTheme(v: String) {
         theme = v
         sp.edit().putString("theme", v).apply()
@@ -78,7 +82,7 @@ class Prefs private constructor(ctx: Context) {
     }
 
     fun updateStartTab(v: Int) {
-        startTab = v.coerceIn(0, 4)
+        startTab = v.coerceIn(0, LAST_TAB)
         sp.edit().putInt("startTab", startTab).apply()
     }
 
@@ -107,6 +111,11 @@ class Prefs private constructor(ctx: Context) {
         sp.edit().putBoolean("navCollapsed", v).apply()
     }
 
+    fun updateRememberPos(v: Boolean) {
+        rememberPos = v
+        sp.edit().putBoolean("rememberPos", v).apply()
+    }
+
     /* ---------------- 底栏排序 / 显隐 ---------------- */
 
     /** 全部 tab 的顺序（包含被隐藏的） */
@@ -114,18 +123,19 @@ class Prefs private constructor(ctx: Context) {
         get() {
             val parsed = tabOrder.split(',')
                 .mapNotNull { it.trim().toIntOrNull() }
-                .filter { it in 0..4 }
+                .filter { it in 0..LAST_TAB }
                 .distinct()
                 .toMutableList()
-            /* 以后加了新 tab 而老设置里没记，补在末尾，不至于凭空消失 */
-            for (i in 0..4) if (i !in parsed) parsed.add(i)
+            /* 以后加了新 tab 而老设置里没记，补在末尾，不至于凭空消失。
+               v1.8 加「收藏」时就靠这一句：老用户存的 0,1,2,3,4 自动补上 5 */
+            for (i in 0..LAST_TAB) if (i !in parsed) parsed.add(i)
             return parsed
         }
 
     val hiddenSet: Set<Int>
         get() = tabHidden.split(',')
             .mapNotNull { it.trim().toIntOrNull() }
-            .filter { it in 0..4 }
+            .filter { it in 0..LAST_TAB }
             .toSet()
 
     /** 真正显示在底栏上的 tab（顺序已排好、隐藏的已剔除，至少留一个） */
@@ -181,7 +191,10 @@ class Prefs private constructor(ctx: Context) {
         }
 
     companion object {
-        private const val DEFAULT_ORDER = "0,1,2,3,4"
+        /** 最大 tab 下标。加新页签时只改这里 + MainActivity 的 TABS */
+        const val LAST_TAB = 5
+
+        private const val DEFAULT_ORDER = "0,1,2,3,4,5"
 
         /* 全 App 一份：界面要读写同一份状态，ViewModel 也得能读到「自动更新」这个开关 */
         @Volatile

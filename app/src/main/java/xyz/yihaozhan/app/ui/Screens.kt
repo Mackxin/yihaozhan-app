@@ -23,10 +23,19 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -40,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +61,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
+import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.FeedItem
 import xyz.yihaozhan.app.data.LinkItem
 import xyz.yihaozhan.app.data.Post
@@ -88,6 +102,11 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
         list.groupBy { it.date }.entries.sortedByDescending { it.key }
     }
 
+    /* 筛出来的是另一批条目，不回到顶部就会停在原来那个位置，
+       看起来像「筛完只剩空白」 */
+    val listState = rememberLazyListState()
+    LaunchedEffect(q, tag) { listState.scrollToItem(0) }
+
     Column(Modifier.fillMaxSize()) {
         PageHeader(
             "分享",
@@ -112,7 +131,8 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
             EmptyState("🍃", "没找到", "换个词试试，或者把筛选清掉。")
         } else {
             LazyColumn(
-                Modifier.fillMaxSize(),
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -127,7 +147,8 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
                         )
                     }
                     items(items, key = { it.id + it.title }) { f ->
-                        FeedCard(f, onOpen)
+                        /* 卡片上的标签也能筛：看到「AI」想找同类，不用先滚回顶上那排 */
+                        FeedCard(f, onOpen) { t -> tag = if (tag == t) "" else t }
                     }
                 }
             }
@@ -136,7 +157,7 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
 }
 
 @Composable
-private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit) {
+private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit, onTag: (String) -> Unit) {
     /* 跟站点一样不铺底色：条目靠留白分开，标签胶囊直接浮在极光上 */
     CardBox(
         padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
@@ -159,7 +180,9 @@ private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit) {
                 if (f.tags.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        f.tags.take(4).forEach { TagChip(it) }
+                        f.tags.take(4).forEach { t ->
+                            TagChip(t, onClick = { onTag(t) })
+                        }
                     }
                 }
             }
@@ -226,65 +249,290 @@ fun PostsScreen(data: AppPayload, onOpen: (Post) -> Unit, onSettings: () -> Unit
     }
 }
 
+/**
+ * 文章阅读页。
+ *
+ * 每段正文是一个 LazyColumn item（不是一整块 MarkdownView），换来三件事：
+ * ① 目录能精确跳到某一节；② 长文只渲染屏幕里的那几段；
+ * ③ 滚动位置能存、能恢复 —— 上次读到哪，这次点进来接着读。
+ *
+ * 顶栏三颗：收藏、稍后读、分享。都在这一层解决，不用为了标个星退出去。
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PostDetailScreen(
     post: Post,
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
-    fontScale: Float = 1f
+    fontScale: Float = 1f,
+    local: Local? = null,
+    rememberPos: Boolean = true
 ) {
-    Column(Modifier.fillMaxSize()) {
-        /* 返回键留左边，标题居中 */
-        Box(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-            IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回")
-            }
-            Text(
-                "文章",
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Center).fillMaxWidth()
-            )
+    val ctx = LocalContext.current
+    val pal = LocalXyPal.current
+    val scope = rememberCoroutineScope()
+
+    val blocks = remember(post.id, post.body) { parseMarkdown(post.body) }
+    /* 目录：标题块 → 它在 LazyColumn 里的 item 下标（第 0 个是标题区，所以 +1） */
+    val toc = remember(post.id, post.body) {
+        blocks.mapIndexedNotNull { i, b ->
+            if (b is MdBlock.Heading && b.level in 2..3 && b.text.isNotBlank()) {
+                Triple(b.level, b.text, i + 1)
+            } else null
         }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp)
-        ) {
-            item {
-                Spacer(Modifier.height(8.dp))
+    }
+
+    val start = remember(post.id) { if (rememberPos) local?.posOf(post.id) else null }
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = start?.first ?: 0,
+        initialFirstVisibleItemScrollOffset = start?.second ?: 0
+    )
+
+    /* 离开（返回、切页、换一篇）时把位置存下来 */
+    DisposableEffect(post.id, rememberPos) {
+        onDispose {
+            if (rememberPos && local != null) {
+                local.savePos(
+                    post.id,
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset
+                )
+            }
+        }
+    }
+
+    var showToc by remember { mutableStateOf(false) }
+    val fav = local?.isFav(post.id) == true
+    val later = local?.isLater(post.id) == true
+    val scrolled = listState.firstVisibleItemIndex > 2
+    val shareUrl = "https://mackxin.github.io/xingyu/#/post/" + post.id
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            /* 顶栏：返回 / 文章名 / 收藏 / 稍后读 / 分享 */
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = pal.text)
+                }
                 Text(
                     post.title,
-                    fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 34.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = pal.dim,
+                    modifier = Modifier.weight(1f).padding(horizontal = 2.dp)
                 )
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(post.date, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (post.tags.isNotEmpty()) {
-                        Spacer(Modifier.width(8.dp))
-                        post.tags.take(3).forEach {
-                            TagChip(it)
-                            Spacer(Modifier.width(6.dp))
+                BarIcon(
+                    icon = if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                    desc = if (fav) "取消收藏" else "收藏",
+                    tint = if (fav) pal.inkA2 else pal.dim
+                ) { local?.toggleFav(post.id) }
+                BarIcon(
+                    icon = if (later) Icons.Rounded.Schedule else Icons.Rounded.Schedule,
+                    desc = if (later) "移出稍后读" else "稍后读",
+                    tint = if (later) pal.inkA3 else pal.dim
+                ) { local?.toggleLater(post.id) }
+                BarIcon(Icons.Rounded.Share, "分享", pal.dim) {
+                    shareText(ctx, post.title + "\n" + shareUrl)
+                }
+            }
+
+            /*
+             * 正文：每块一个 item，整段可以长按选中复制。
+             * 选中用 SelectionContainer 包**每一块**，别包整个 LazyColumn ——
+             * 后者在滚动时选区会错位，跨块拖选也拿不全。
+             */
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy((10 * fontScale).dp)
+            ) {
+                item(key = "head") {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                        Text(
+                            post.title,
+                            fontSize = 25.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 34.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(post.date, fontSize = 12.sp, color = pal.mute)
+                            if (post.tags.isNotEmpty()) {
+                                Spacer(Modifier.width(8.dp))
+                                post.tags.take(3).forEach {
+                                    TagChip(it)
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(20.dp))
-            }
-            item { MarkdownView(post.body, fontScale = fontScale) }
-            item {
-                Spacer(Modifier.height(34.dp))
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TextButton(onClick = { onOpen("https://mackxin.github.io/xingyu/#/post/" + post.id) }) {
-                        Text("在浏览器里看这篇", fontSize = 13.sp)
+                itemsIndexed(blocks) { i, b ->
+                    SelectionContainer {
+                        MdBlockView(b, fontScale)
                     }
+                }
+                item(key = "foot") {
+                    Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
+                        HairLine()
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 12.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            TextButton(onClick = { onOpen(shareUrl) }) {
+                                Text("在浏览器里看这篇", fontSize = 13.sp)
+                            }
+                            TextButton(onClick = { shareText(ctx, post.title + "\n" + shareUrl) }) {
+                                Icon(Icons.Rounded.Share, null, Modifier.size(14.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("分享", fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* 右下角两颗浮动小圆：回顶（滚下去才出现）和目录（有标题才出现） */
+        Column(
+            Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.End
+        ) {
+            if (scrolled) {
+                RoundBtn(Icons.Rounded.VerticalAlignTop, "回到顶部") {
+                    scope.launch { listState.animateScrollToItem(0) }
+                }
+            }
+            if (toc.isNotEmpty()) {
+                RoundBtn(Icons.AutoMirrored.Rounded.List, "文章目录") { showToc = true }
+            }
+        }
+
+        if (showToc) {
+            TocSheet(
+                items = toc,
+                onPick = { idx ->
+                    showToc = false
+                    scope.launch { listState.animateScrollToItem(idx) }
+                },
+                onDismiss = { showToc = false }
+            )
+        }
+    }
+}
+
+/** 顶栏上一颗 40dp 的图标按钮 */
+@Composable
+private fun BarIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    IconButton(onClick = onClick) {
+        Icon(icon, desc, tint = tint, modifier = Modifier.size(19.dp))
+    }
+}
+
+/** 右下角那颗玻璃小圆 */
+@Composable
+private fun RoundBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    onClick: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Box(
+        Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(pal.bgSoft)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, desc, tint = pal.dim, modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * 目录：从底部升起来的一张卡，标题多的文章才用得上。
+ * 不做成 ModalBottomSheet —— 为了这一张卡片引一整套弹层状态不值当。
+ */
+@Composable
+private fun TocSheet(
+    items: List<Triple<Int, String, Int>>,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.42f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onDismiss() }
+    ) {
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(12.dp)
+                .clip(RoundedCornerShape(XyR.lg.dp))
+                .background(pal.bgSoft)
+                .padding(vertical = 14.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "文章目录",
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = pal.text, modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "${items.size} 节",
+                    fontSize = 11.5.sp, color = pal.mute
+                )
+            }
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp)) {
+                items(items) { (level, text, idx) ->
+                    Text(
+                        text,
+                        fontSize = if (level == 2) 13.5.sp else 12.5.sp,
+                        lineHeight = 20.sp,
+                        color = if (level == 2) pal.text else pal.dim,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onPick(idx) }
+                            .padding(
+                                start = if (level == 2) 18.dp else 32.dp,
+                                end = 18.dp, top = 9.dp, bottom = 9.dp
+                            )
+                    )
                 }
             }
         }
@@ -299,7 +547,8 @@ fun LinksScreen(
     data: AppPayload,
     onOpen: (String) -> Unit,
     onSettings: () -> Unit,
-    startCollapsed: Boolean = false
+    startCollapsed: Boolean = false,
+    local: Local? = null
 ) {
     var q by remember { mutableStateOf("") }
 
@@ -340,6 +589,17 @@ fun LinksScreen(
     val listState = rememberLazyListState()
     LaunchedEffect(keyword) { listState.scrollToItem(0) }
 
+    /* 点开一个站点：先记一笔「最近打开」，再交给外面打开。
+       所有入口（分类里的标签、最近那一排）都走这一个函数，记录才不漏。 */
+    val visit: (String, String) -> Unit = { name, url ->
+        local?.record(url, name)
+        onOpen(url)
+    }
+    val recents = local?.recents.orEmpty()
+    val scope = rememberCoroutineScope()
+    val farDown = listState.firstVisibleItemIndex > 6
+
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         PageHeader(
             "导航",
@@ -379,6 +639,35 @@ fun LinksScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 24.dp)
             ) {
+                /* 最近打开：搜索时不显示（那时候你要的是「找到什么」，
+                   不是「刚看了什么」） */
+                if (!searching && recents.isNotEmpty()) {
+                    item(key = "recent") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "最近打开",
+                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                color = pal.mute, modifier = Modifier.weight(1f)
+                            )
+                            TinyBtn("清空") { local?.clearRecents() }
+                        }
+                    }
+                    item(key = "recent-body") {
+                        FlowRow(
+                            Modifier.fillMaxWidth().padding(top = 2.dp, start = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            recents.forEach { r ->
+                                LinkChip(LinkItem(name = r.name, url = r.url)) { visit(r.name, r.url) }
+                            }
+                        }
+                    }
+                    item(key = "recent-gap") { Spacer(Modifier.height(12.dp)) }
+                }
                 groups.forEach { (cat, links) ->
                     item(key = "H|" + cat.id) {
                         CatHeader(
@@ -403,11 +692,20 @@ fun LinksScreen(
                                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                                 verticalArrangement = Arrangement.spacedBy(7.dp)
                             ) {
-                                links.forEach { l -> LinkChip(l, onOpen) }
+                                links.forEach { l -> LinkChip(l) { visit(l.name, l.url) } }
                             }
                         }
                     }
                     item(key = "S|" + cat.id) { Spacer(Modifier.height(12.dp)) }
+                }
+            }
+        }
+    }
+        /* 两千多个站点滑到深处，没这颗圆就回不去了 */
+        if (farDown) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 22.dp)) {
+                RoundBtn(Icons.Rounded.VerticalAlignTop, "回到顶部") {
+                    scope.launch { listState.animateScrollToItem(0) }
                 }
             }
         }
@@ -480,7 +778,7 @@ private fun CatHeader(
  * 用的都是 emoji，反而花）。
  */
 @Composable
-private fun LinkChip(link: LinkItem, onOpen: (String) -> Unit) {
+private fun LinkChip(link: LinkItem, onOpen: () -> Unit) {
     val pal = LocalXyPal.current
     Text(
         link.name,
@@ -495,7 +793,7 @@ private fun LinkChip(link: LinkItem, onOpen: (String) -> Unit) {
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { onOpen(link.url) }
+            ) { onOpen() }
             .padding(horizontal = 12.dp, vertical = 8.dp)
     )
 }
@@ -534,4 +832,108 @@ private fun lastSyncText(ts: Long): String {
     if (ts <= 0L) return "还没同步过"
     val sdf = SimpleDateFormat("M 月 d 日 HH:mm", Locale.CHINA)
     return sdf.format(Date(ts))
+}
+
+/* ============================ 收藏 ============================ */
+
+/**
+ * 收藏 / 稍后读。
+ *
+ * 站点那边也有这两个功能，但那是存在你浏览器里的；App 里这一份是本机的，
+ * 两边互不同步 —— 也不该同步：`app.json` 只装公共内容，私人标记一律不出手机。
+ *
+ * 两段用胶囊切，比上下铺两段省一屏；标过的文章按日期倒序，跟文章页一个顺序。
+ */
+@Composable
+fun SavedScreen(
+    posts: List<Post>,
+    local: Local,
+    onOpenPost: (Post) -> Unit,
+    onSettings: () -> Unit
+) {
+    var tab by rememberSaveable { mutableStateOf(0) }
+
+    val favs = remember(local.fav, posts) {
+        posts.filter { it.id in local.fav }.sortedByDescending { it.date }
+    }
+    val laters = remember(local.later, posts) {
+        posts.filter { it.id in local.later }.sortedByDescending { it.date }
+    }
+    val shown = if (tab == 0) favs else laters
+
+    Column(Modifier.fillMaxSize()) {
+        PageHeader(
+            "收藏",
+            "标了星的、留着待会儿看的，都在这台手机里。",
+            meta = "收藏 ${favs.size} · 稍后读 ${laters.size}",
+            onSettings = onSettings
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TagChip("收藏 ${favs.size}", { tab = 0 }, active = tab == 0)
+            TagChip("稍后读 ${laters.size}", { tab = 1 }, active = tab == 1)
+        }
+        if (shown.isEmpty()) {
+            if (tab == 0) {
+                EmptyState("⭐️", "还没收藏", "文章右上角那颗星点一下，就收到这儿。")
+            } else {
+                EmptyState("🕐", "稍后读是空的", "文章右上角那颗时钟点一下，先记着待会儿看。")
+            }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(shown, key = { it.id }) { p ->
+                    CardBox(
+                        padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+                        glass = false,
+                        onClick = { onOpenPost(p) }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    p.title, fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold, lineHeight = 23.sp
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text(p.date, fontSize = 11.5.sp, color = LocalXyPal.current.mute)
+                                if (p.excerpt.isNotBlank()) {
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(
+                                        p.excerpt, fontSize = 13.sp, lineHeight = 20.sp,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(99.dp))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        if (tab == 0) local.toggleFav(p.id) else local.toggleLater(p.id)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    if (tab == 0) Icons.Rounded.Star else Icons.Rounded.Schedule,
+                                    "移出",
+                                    tint = if (tab == 0) LocalXyPal.current.inkA2 else LocalXyPal.current.inkA3,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
