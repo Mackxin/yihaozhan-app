@@ -23,6 +23,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
@@ -388,7 +391,8 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .fillMaxHeight()
-                    .width(312.dp),
+                    /* 一行三个：五十个分类竖成一列要滑半天，三列一屏基本扫得完 */
+                    .fillMaxWidth(0.94f),
                 color = pal.bgSoft,
                 shadowElevation = 0.dp
             ) {
@@ -405,20 +409,22 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                         )
                     }
                     HairLine()
-                    /* 一行摆好几个：五十个分类竖成一列要滑半天，挤成小胶囊一屏扫完，也不用滚动条 */
-                    FlowRow(
-                        Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 14.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 12.dp, end = 12.dp, top = 10.dp, bottom = 14.dp
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        CatChip("🗂", "全部", data.stats.links, catId.isEmpty()) {
-                            catId = ""
-                            catOpen = false
+                        item(key = "__all__") {
+                            CatChip("🗂", "全部", data.stats.links, catId.isEmpty()) {
+                                catId = ""
+                                catOpen = false
+                            }
                         }
-                        cats.forEach { c ->
+                        items(cats, key = { it.id }) { c ->
                             CatChip(c.icon, c.name, c.links.size, catId == c.id) {
                                 catId = c.id
                                 catOpen = false
@@ -434,6 +440,9 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
 /**
  * 抽屉里的分类胶囊：图标 + 名字 + 站点数。
  * 选中的用站点那条渐变当底，字压深墨（白字在最浅的青色上只有 1.59:1）。
+ *
+ * 一行三个，所以宽度被网格锁死：名字用 weight 占剩余宽度、放不下就省略号，
+ * 不许它把整行撑变形（名字长的「孕期全程管理」会顶出去）。
  */
 @Composable
 private fun CatChip(
@@ -446,30 +455,34 @@ private fun CatChip(
     val pal = LocalXyPal.current
     Row(
         Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(99.dp))
             .then(
                 if (selected) Modifier.background(pal.grad())
                 else Modifier.background(pal.glass)
             )
             .clickable { onClick() }
-            .padding(horizontal = 11.dp, vertical = 6.dp),
+            .padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon.isNotBlank()) {
-            Text(icon, fontSize = 11.5.sp)
-            Spacer(Modifier.width(5.dp))
+            Text(icon, fontSize = 10.5.sp)
+            Spacer(Modifier.width(4.dp))
         }
         Text(
             name,
-            fontSize = 12.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
             color = if (selected) XY_INK else pal.dim
         )
-        Spacer(Modifier.width(5.dp))
+        Spacer(Modifier.width(4.dp))
         Text(
             "$count",
-            fontSize = 10.sp,
+            fontSize = 9.sp,
+            maxLines = 1,
             color = if (selected) XY_INK.copy(alpha = 0.72f) else pal.mute
         )
     }

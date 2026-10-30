@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -64,6 +67,7 @@ import xyz.yihaozhan.app.ui.HomeScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.PostDetailScreen
+import xyz.yihaozhan.app.ui.PullRefresh
 import xyz.yihaozhan.app.ui.PostsScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
@@ -127,10 +131,24 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
         pageCount = { visible.size }
     )
     val curId = visible.getOrElse(pager.currentPage) { visible.first() }
+    /* 连续位置（当前页 + 拖到一半的偏移）：底栏那颗高亮胶囊靠它跟着手指平滑走。
+       翻页翻过去的瞬间 currentPage 加一、offsetFraction 正好变成 -0.5，两边接得上，不会跳。 */
+    val dockPos = pager.currentPage + pager.currentPageOffsetFraction
 
     /* 底栏被改过（隐藏/换序）之后页数会变，把位置夹回范围内 */
     LaunchedEffect(prefs.tabOrder, prefs.tabHidden) {
         if (pager.currentPage > visible.lastIndex) pager.scrollToPage(visible.lastIndex)
+    }
+
+    /* 隔了一页以上就瞬移，不 animate —— 动画会把中间那几页拖过去一遍，
+       肉眼看就是「闪一下」；相邻页才用滑的，才自然。 */
+    val goPage: (Int) -> Unit = { i ->
+        if (i in visible.indices && i != pager.currentPage) {
+            scope.launch {
+                if (kotlin.math.abs(i - pager.currentPage) > 1) pager.scrollToPage(i)
+                else pager.animateScrollToPage(i)
+            }
+        }
     }
 
     val goTab: (Int) -> Unit = { id ->
@@ -139,7 +157,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
             openPost = null
             showSettings = false
             webUrl = null
-            scope.launch { pager.animateScrollToPage(i) }
+            goPage(i)
         }
     }
 
@@ -158,12 +176,13 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
         bottomBar = {
             if (openPost == null && !showSettings && webUrl == null) {
                 BottomDock(
+                    position = dockPos,
                     current = curId,
                     tabs = visible,
                     showIcons = prefs.dockIcons
                 ) { id ->
                     val i = visible.indexOf(id)
-                    if (i >= 0) scope.launch { pager.animateScrollToPage(i) }
+                    if (i >= 0) goPage(i)
                 }
             }
         }
@@ -178,26 +197,32 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
                 openPost != null -> PostDetailScreen(
                     openPost!!, { openPost = null }, open, prefs.fontScale
                 )
-                else -> HorizontalPager(
-                    state = pager,
-                    modifier = Modifier.fillMaxSize(),
-                    /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
-                    beyondBoundsPageCount = 1,
-                    key = { visible[it] }
-                ) { page ->
-                    when (visible[page]) {
-                        0 -> HomeScreen(
-                            data = data,
-                            offline = ui.offline,
-                            onSettings = { showSettings = true },
-                            onOpen = open,
-                            onGoTab = goTab,
-                            onOpenPost = { openPost = it }
-                        )
-                        1 -> FeedScreen(data, open) { showSettings = true }
-                        2 -> PostsScreen(data, { openPost = it }) { showSettings = true }
-                        3 -> LinksScreen(data, open) { showSettings = true }
-                        else -> AboutScreen(vm, open) { showSettings = true }
+                /* 下拉刷新只包在五个内容页上：网页预览 / 设置 / 阅读页下拉没意义 */
+                else -> PullRefresh(
+                    refreshing = ui.refreshing,
+                    onRefresh = { vm.refresh() }
+                ) {
+                    HorizontalPager(
+                        state = pager,
+                        modifier = Modifier.fillMaxSize(),
+                        /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
+                        beyondBoundsPageCount = 1,
+                        key = { visible[it] }
+                    ) { page ->
+                        when (visible[page]) {
+                            0 -> HomeScreen(
+                                data = data,
+                                offline = ui.offline,
+                                onSettings = { showSettings = true },
+                                onOpen = open,
+                                onGoTab = goTab,
+                                onOpenPost = { openPost = it }
+                            )
+                            1 -> FeedScreen(data, open) { showSettings = true }
+                            2 -> PostsScreen(data, { openPost = it }) { showSettings = true }
+                            3 -> LinksScreen(data, open) { showSettings = true }
+                            else -> AboutScreen(vm, open) { showSettings = true }
+                        }
                     }
                 }
             }
@@ -210,15 +235,25 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
  *
  * 图标默认不显示（设置里能开）：只留文字时药丸只有 ~44dp 高，几乎不抢内容；
  * 想一眼认出来再去设置里打开图标。按钮的先后顺序和显示隐藏也在设置里改。
+ *
+ * 高亮是一颗**会滑的胶囊**，位置取 pager 的连续位置（`position`），
+ * 所以左右翻页时它跟内容一起走，而不是到页了才「啪」地跳过去。
  */
 @Composable
 private fun BottomDock(
+    position: Float,
     current: Int,
     tabs: List<Int>,
     showIcons: Boolean,
     onPick: (Int) -> Unit
 ) {
     val pal = LocalXyPal.current
+    val itemW = if (showIcons) 58.dp else 64.dp
+    val gap = 1.dp
+    val density = LocalDensity.current
+    /* 胶囊高度取整行的实测高度：图标开关会让行变高，写死数字迟早对不上 */
+    var rowH by remember { mutableStateOf(0) }
+
     Box(
         Modifier
             .fillMaxWidth()
@@ -226,44 +261,57 @@ private fun BottomDock(
             .padding(bottom = 10.dp, top = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Row(
+        Box(
             Modifier
                 .clip(RoundedCornerShape(99.dp))
                 .background(pal.bgSoft.copy(alpha = 0.94f))
-                .padding(horizontal = 5.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(1.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(5.dp)
         ) {
-            tabs.forEach { id ->
-                val t = TABS.firstOrNull { it.id == id } ?: return@forEach
-                val on = current == id
-                Column(
+            if (rowH > 0) {
+                Box(
                     Modifier
-                        /* 固定宽度：不然选中项字重变粗会让整颗药丸左右微跳 */
-                        .width(if (showIcons) 58.dp else 64.dp)
-                        .clip(RoundedCornerShape(99.dp))
-                        .then(if (on) Modifier.background(pal.glassHi) else Modifier)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onPick(id) }
-                        .padding(vertical = if (showIcons) 6.dp else 9.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (showIcons) {
-                        Icon(
-                            t.icon, null,
-                            Modifier.size(19.dp),
-                            tint = if (on) pal.inkA1 else pal.mute
+                        .align(Alignment.CenterStart)
+                        .offset(x = (itemW + gap) * position)
+                        .width(itemW)
+                        .height(with(density) { rowH.toDp() })
+                        .background(pal.glassHi, RoundedCornerShape(99.dp))
+                )
+            }
+            Row(
+                Modifier.onSizeChanged { rowH = it.height },
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabs.forEach { id ->
+                    val t = TABS.firstOrNull { it.id == id } ?: return@forEach
+                    val on = current == id
+                    Column(
+                        Modifier
+                            /* 固定宽度：不然选中项字重变粗会让整颗药丸左右微跳 */
+                            .width(itemW)
+                            .clip(RoundedCornerShape(99.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onPick(id) }
+                            .padding(vertical = if (showIcons) 6.dp else 9.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (showIcons) {
+                            Icon(
+                                t.icon, null,
+                                Modifier.size(19.dp),
+                                tint = if (on) pal.inkA1 else pal.mute
+                            )
+                            Spacer(Modifier.height(2.dp))
+                        }
+                        Text(
+                            t.label,
+                            fontSize = if (showIcons) 9.5.sp else 12.5.sp,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (on) pal.inkA1 else pal.mute
                         )
-                        Spacer(Modifier.height(2.dp))
                     }
-                    Text(
-                        t.label,
-                        fontSize = if (showIcons) 9.5.sp else 12.5.sp,
-                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (on) pal.inkA1 else pal.mute
-                    )
                 }
             }
         }
