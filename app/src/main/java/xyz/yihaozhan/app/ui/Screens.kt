@@ -2,13 +2,10 @@ package xyz.yihaozhan.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,27 +18,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Surface
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,13 +40,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -302,135 +296,102 @@ fun PostDetailScreen(
 @Composable
 fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     var q by remember { mutableStateOf("") }
-    var catId by remember { mutableStateOf("") }
-    var catOpen by remember { mutableStateOf(false) }
 
     val pal = LocalXyPal.current
     val cats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
-    val activeCat = remember(catId, cats) { cats.firstOrNull { it.id == catId } }
+    val keyword = remember(q) { q.trim().lowercase() }
+    val searching = keyword.isNotEmpty()
 
-    val flat = remember(catId, q, cats) {
-        val src = if (activeCat != null) listOf(activeCat) else cats
-        val keyword = q.trim().lowercase()
-        src.flatMap { c ->
-            c.links.filter { l ->
-                keyword.isEmpty() ||
-                    l.name.lowercase().contains(keyword) ||
+    /* 搜索时只留有命中的分类，组内也只留命中的链接 —— 搜索结果仍然按分类分组 */
+    val groups = remember(cats, keyword) {
+        cats.mapNotNull { c ->
+            val hits = if (keyword.isEmpty()) c.links else c.links.filter { l ->
+                l.name.lowercase().contains(keyword) ||
                     l.desc.lowercase().contains(keyword) ||
                     l.url.lowercase().contains(keyword)
-            }.map { c.name to it }
+            }
+            if (hits.isEmpty()) null else c to hits
         }
     }
 
-    /* 抽屉开着时返回键先关抽屉 —— 不拦这一下，按返回会把 App 退出 */
-    BackHandler(enabled = catOpen) { catOpen = false }
+    /* 只记「折起来的分类 id」，空着就等于全展开；
+       比给每个分类存一个开关省事，加新分类也不用补默认值。
+       用 rememberSaveable 存成 Set：翻几页再回来、转个屏，折叠状态还在 */
+    var foldedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    fun isOpen(id: String) = searching || id !in foldedIds
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            PageHeader(
-                "导航",
-                "随手翻的一堆站点，按分类收好。",
-                meta = "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
-                onSettings = onSettings,
-                leading = {
-                    IconButton(onClick = { catOpen = true }) {
-                        Icon(Icons.Rounded.Menu, "分类", tint = pal.dim)
-                    }
-                }
+    /* 搜索时一律展开（不然搜到的东西被折起来看不见，等于白搜） */
+    fun setAll(open: Boolean) {
+        foldedIds = if (open) emptySet() else groups.map { it.first.id }.toSet()
+    }
+
+    /* 列表条目会随搜索整批换掉，不重置滚动位置就会停在新结果的中段 */
+    val listState = rememberLazyListState()
+    LaunchedEffect(keyword) { listState.scrollToItem(0) }
+
+    Column(Modifier.fillMaxSize()) {
+        PageHeader(
+            "导航",
+            "随手翻的一堆站点，按分类收好。",
+            meta = "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
+            onSettings = onSettings
+        )
+        SearchField(q, { q = it }, "搜站点名、描述、网址", Modifier.padding(horizontal = 20.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (searching) "找到 ${groups.sumOf { it.second.size }} 个" else "${groups.size} 个分类",
+                fontSize = 11.5.sp, color = pal.mute
             )
-            SearchField(q, { q = it }, "搜站点名、描述、网址", Modifier.padding(horizontal = 20.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (activeCat != null) {
-                    TagChip("${activeCat.icon} ${activeCat.name}".trim(), { catId = "" }, active = true)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text("${flat.size} 个", fontSize = 11.5.sp, color = pal.mute)
-            }
-            if (flat.isEmpty()) {
-                EmptyState("🔍", "没找到", "换个关键词试试。")
-            } else {
-                /* 不做一行一个了：两列瀑布，卡片高度跟着内容走 */
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 24.dp),
-                    verticalItemSpacing = 8.dp,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(
-                        flat,
-                        key = { i, item -> "L$i|" + item.second.url + "|" + item.second.name }
-                    ) { _, item ->
-                        LinkCard(item.first, item.second, onOpen, showCat = activeCat == null)
-                    }
-                }
+            Spacer(Modifier.weight(1f))
+            /* 搜索时是强制展开的，这两个按钮就没意义了 */
+            if (!searching) {
+                TinyBtn("全部展开") { setAll(true) }
+                Spacer(Modifier.width(6.dp))
+                TinyBtn("全部折叠") { setAll(false) }
             }
         }
-
-        /*
-         * 分类抽屉自己做，不用 ModalNavigationDrawer：
-         * 它默认「整屏任意横向拖动都能拉开」，正好跟左右翻页抢手势 —— 划一下页面抽屉就被拽出来。
-         * 自己画一层浮层，只认汉堡按钮，手势干干净净。
-         */
-        if (catOpen) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.30f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { catOpen = false }
-            )
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxHeight()
-                    /* 一行三个：五十个分类竖成一列要滑半天，三列一屏基本扫得完 */
-                    .fillMaxWidth(0.94f),
-                color = pal.bgSoft,
-                shadowElevation = 0.dp
+        if (groups.isEmpty()) {
+            EmptyState("🔍", "没找到", "换个关键词试试。")
+        } else {
+            /*
+             * 分类标题 + 该分类的链接，一节一节往下排；标题点一下折叠/展开。
+             * 每一行链接都是独立的懒加载条目（不是把整节塞进一个 item），
+             * 全部展开时有四百多张卡，只有这样才不卡。
+             */
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 24.dp)
             ) {
-                Column(Modifier.fillMaxSize()) {
-                    Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 12.dp)) {
-                        Text(
-                            "分类", fontSize = 19.sp, fontWeight = FontWeight.Bold,
-                            color = pal.text
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
-                            fontSize = 12.sp, color = pal.mute
+                groups.forEach { (cat, links) ->
+                    item(key = "H|" + cat.id) {
+                        CatHeader(
+                            icon = cat.icon,
+                            name = cat.name,
+                            count = links.size,
+                            open = isOpen(cat.id),
+                            locked = searching,
+                            /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
+                            onToggle = {
+                                foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
+                                else foldedIds + cat.id
+                            }
                         )
                     }
-                    HairLine()
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = 12.dp, end = 12.dp, top = 10.dp, bottom = 14.dp
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        item(key = "__all__") {
-                            CatChip("🗂", "全部", data.stats.links, catId.isEmpty()) {
-                                catId = ""
-                                catOpen = false
-                            }
-                        }
-                        items(cats, key = { it.id }) { c ->
-                            CatChip(c.icon, c.name, c.links.size, catId == c.id) {
-                                catId = c.id
-                                catOpen = false
+                    if (isOpen(cat.id)) {
+                        val rows = links.chunked(2)
+                        rows.forEachIndexed { ri, pair ->
+                            item(key = "R|" + cat.id + "|" + ri) {
+                                LinkRow(pair, onOpen)
                             }
                         }
                     }
+                    item(key = "S|" + cat.id) { Spacer(Modifier.height(14.dp)) }
                 }
             }
         }
@@ -438,54 +399,97 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
 }
 
 /**
- * 抽屉里的分类胶囊：图标 + 名字 + 站点数。
- * 选中的用站点那条渐变当底，字压深墨（白字在最浅的青色上只有 1.59:1）。
- *
- * 一行三个，所以宽度被网格锁死：名字用 weight 占剩余宽度、放不下就省略号，
- * 不许它把整行撑变形（名字长的「孕期全程管理」会顶出去）。
+ * 分类标题条：图标 + 名字 + 站点数 + 一个会转的箭头。
+ * 整条都能点（箭头那么小，只有点得中才有鬼）。
  */
 @Composable
-private fun CatChip(
+private fun CatHeader(
     icon: String,
     name: String,
     count: Int,
-    selected: Boolean,
-    onClick: () -> Unit
+    open: Boolean,
+    locked: Boolean,
+    onToggle: () -> Unit
 ) {
     val pal = LocalXyPal.current
+    val rot by animateFloatAsState(if (open) 180f else 0f, label = "nav-chev")
+
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(99.dp))
-            .then(
-                if (selected) Modifier.background(pal.grad())
-                else Modifier.background(pal.glass)
-            )
-            .clickable { onClick() }
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            /* 不铺底色：分类是「小标题」，卡片才是内容块。
+               跟分享页那种日期小标题一个语言，一眼能分开层级 */
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = !locked
+            ) { onToggle() }
+            .padding(horizontal = 4.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (icon.isNotBlank()) {
-            Text(icon, fontSize = 10.5.sp)
-            Spacer(Modifier.width(4.dp))
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(icon.ifBlank { name.take(1) }, fontSize = 13.sp)
         }
+        Spacer(Modifier.width(9.dp))
         Text(
-            name,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-            color = if (selected) XY_INK else pal.dim
+            name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            "$count",
-            fontSize = 9.sp,
-            maxLines = 1,
-            color = if (selected) XY_INK.copy(alpha = 0.72f) else pal.mute
-        )
+        Text("$count", fontSize = 11.sp, color = pal.mute)
+        if (!locked) {
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                Icons.Rounded.KeyboardArrowDown, "展开或折叠",
+                tint = pal.mute,
+                modifier = Modifier
+                    .size(20.dp)
+                    .rotate(rot)
+            )
+        }
     }
+}
+
+/** 一行两张卡；只有一张时右边留白，别让它撑成整行宽 */
+@Composable
+private fun LinkRow(pair: List<LinkItem>, onOpen: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        pair.forEach { l ->
+            Box(Modifier.weight(1f)) { LinkCard("", l, onOpen, showCat = false) }
+        }
+        if (pair.size == 1) Spacer(Modifier.weight(1f))
+    }
+}
+
+/** 「全部展开 / 全部折叠」这种小胶囊按钮 */
+@Composable
+private fun TinyBtn(text: String, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    Text(
+        text,
+        fontSize = 11.sp,
+        color = pal.dim,
+        modifier = Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .background(pal.glass)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    )
 }
 
 /** 导航卡片：竖着排，图标 + 名字 + 描述，高度自然跟着内容变 */
