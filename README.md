@@ -17,9 +17,66 @@
 > 支持 Android 7.0（API 24）及以上。
 > 这个包用调试证书签名（个人自用，不上应用商店），所以每次覆盖安装新版本都不用卸载旧的。
 
+**装过一次之后就不用再来了** —— 见下面「二、App 自己更新」。
+
 ---
 
-## 二、内容怎么更新
+## 二、App 自己更新
+
+打开 App 时会顺手问一句线上最新版是多少（`api/app-version.json`），比本机大就弹窗：
+
+```
+冷启动 → 静默检查版本（不打扰、连不上就算了）
+           ↓ 有新版
+      ┌─────────────────────────────┐
+      │  新版本 v1.6                │
+      │  你现在是 v1.5 · 1.21 MB     │
+      │  ┌───────────────────────┐  │
+      │  │ 更新说明…              │  │
+      │  └───────────────────────┘  │
+      │        [稍后]  [立即更新]    │
+      └─────────────────────────────┘
+           ↓ 点「立即更新」
+      下载（带百分比进度）→ 下完按钮变「去安装」
+           ↓
+      系统安装器弹出 → 安装 → 覆盖旧版，数据和设置都还在
+```
+
+几个实现上的讲究：
+
+| 地方 | 为什么这么写 |
+|---|---|
+| 安装包放**站点同域**（`api/app.apk`），不放 GitHub Release | Release 的二进制落在 `objects.githubusercontent.com`，国内经常连不上；`app.json` 能拉到就说明同域这个包也一定拉得到 |
+| 版本比对只认 `versionCode`（整数） | `versionName` 是给人看的字符串，比大小不可靠 |
+| 请求带 `?t=时间戳` + `Cache-Control: no-cache` | 站点的 Service Worker 对静态资源是「缓存优先」，不带这两个参数会读到上一版 json，永远发现不了新版 |
+| 用 `FileProvider` 递 `content://` 给安装器 | Android 7 起给别的应用传 `file://` 直接抛 `FileUriExposedException` |
+| 装之前先查 `canRequestPackageInstalls()` | 没开「允许安装未知应用」时拉不起来安装器，得先跳去那个开关页（`ACTION_MANAGE_UNKNOWN_APP_SOURCES`） |
+| 下完校验字节数 | 下到一半断了会留一个半截 apk，不校验的话安装器报「解析失败」，用户看不懂 |
+| 「稍后」会删掉缓存里的包 | 不然占着几 MB，下次还会以为已经下好了 |
+
+设置页「关于」里常驻一行，能手动检查、也能看到下载进度：
+
+| 状态 | 显示 |
+|---|---|
+| 没查过 / 已是最新 | `v1.5 · 已经是最新版` + 「检查更新」 |
+| 发现新版 | `v1.5 · 发现 v1.6` + 「更新」 |
+| 下载中 | 进度条 + 百分比 |
+| 下好了 | `v1.5 · v1.6 已下载` + 「去安装」 |
+
+**发新版本的完整动作**（在站点仓库里跑）：
+
+```bash
+node tools/publish-app.js --notes "这次改了什么"
+git add api/app.apk api/app-version.json && git commit -m "发布 App 1.6" && git push
+```
+
+脚本会自己从 App 仓库的 `app/build.gradle.kts` 读 `versionCode`/`versionName`（版本号的唯一真相在那儿），
+调 `./gradlew :app:assembleRelease` 打包，复制成 `api/app.apk`，再写 `api/app-version.json`。
+已经有现成的包就 `--apk <路径>` 跳过编译。
+
+---
+
+## 三、内容怎么更新
 
 App 自己不生产内容，只负责展示。内容都在**站点仓库**里，链路是这样：
 
@@ -58,7 +115,7 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 
 ---
 
-## 三、界面说明
+## 四、界面说明
 
 | 页面 | 里面是什么 |
 |---|---|
@@ -92,7 +149,7 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 
 顶部所有页面的标题、说明、小字都是**居中**的，齿轮固定在右上角。
 
-## 三点五、链接在 App 里打开
+## 四点五、链接在 App 里打开
 
 导航里点任何一条站点，不会跳出去开浏览器，而是**当前页面内就地打开**（WebView）：
 
@@ -105,7 +162,7 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 `AndroidManifest.xml` 里开了 `usesCleartextTraffic="true"`：
 站点数据里不少老链接还是 `http://`，Android 9 以后默认禁明文，不开就是 `ERR_CLEARTEXT_NOT_PERMITTED` 一片红。
 
-## 四、外观：照抄站点手机版
+## 五、外观：照抄站点手机版
 
 App 不是一套自创的 Material 皮肤，而是把站点 `assets/css/style.css` 里的设计变量搬了过来
 （见 `ui/Theme.kt` 的 `XyPal`）。改外观请先改站点那套变量，再同步这里，别单独发明颜色。
@@ -139,24 +196,26 @@ App 不是一套自创的 Material 皮肤，而是把站点 `assets/css/style.cs
   高亮是一颗单独的胶囊层，位置 = `currentPage + currentPageOffsetFraction`，所以翻页时和内容一起滑；
   高度取整行实测高度（`onSizeChanged`），开图标变高也不会对不上。
 
-## 五、代码结构
+## 六、代码结构
 
 ```
 app/src/main/java/xyz/yihaozhan/app/
 ├── MainActivity.kt          横滑翻页容器 + 悬浮药丸底栏（可排序列/显隐）+ 返回键分层
-├── MainVm.kt                状态机：先读缓存再拉网络
+├── MainVm.kt                状态机：先读缓存再拉网络；自更新的版本检查/下载/安装
 ├── data/
 │   ├── AppData.kt           数据模型（kotlinx.serialization）
 │   ├── Prefs.kt             设置项（SharedPreferences + Compose 状态，含底栏顺序/显隐）
-│   └── Repo.kt              拉取 + 缓存读写 + 联网判断 + 清缓存
+│   ├── Repo.kt              拉取 + 缓存读写 + 联网判断 + 清缓存
+│   └── Update.kt            自更新：查版本 / 下安装包 / FileProvider 递安装器
 └── ui/
     ├── Theme.kt             配色（照站点 CSS 变量）+ 极光背景（烘成位图）+ 沉浸式状态栏
     ├── Markdown.kt          自己写的 Markdown 渲染（标题/列表/引用/代码/表格）
     ├── Common.kt            居中页头（带齿轮/汉堡位）、搜索框、标签、卡片、统计格
     ├── HomeScreen.kt        首页
-    ├── SettingsScreen.kt    设置页
+    ├── SettingsScreen.kt    设置页（含「关于」里的版本行）
     ├── WebScreen.kt         App 内网页预览（顶栏 + WebView + 打不开的中文提示页）
     ├── PullRefresh.kt       下拉刷新（自己的手势 + 顶部小弧指示器）
+    ├── UpdateDialog.kt      更新弹窗 + 设置页版本行（两种形态共用一套状态）
     └── Screens.kt           分享 / 文章 / 文章详情 / 导航（分类浮层 + 瀑布流）/ 关于
 ```
 
@@ -168,11 +227,14 @@ app/src/main/java/xyz/yihaozhan/app/
 
 导航页的分类也没用 `ModalNavigationDrawer`：它默认**整屏横向拖动都能把抽屉拽出来**，
 和左右滑动翻页抢手势（设 `gesturesEnabled = false` 仍会误开）。所以改成自制浮层
-（`Box` 遮罩 + `Surface` + `FlowRow`），手势互不干扰。
+（`Box` 遮罩 + `Surface`），里面是 `LazyVerticalGrid` **三列**——五十个分类十七行，一屏扫完，不用滚动条。
+
+自更新的状态机和内容同步共用 `MainVm`，没有引 `androidx.work` 之类的库：
+`UpdateRepo` 里就是 OkHttp 一个 GET + 一个带进度的下载，加一个 `FileProvider` 授权，总共不到 200 行。
 
 ---
 
-## 六、自己构建
+## 七、自己构建
 
 需要 JDK 17 和 Android SDK（`local.properties` 里的 `sdk.dir` 指向 SDK 路径）。
 

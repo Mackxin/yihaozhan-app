@@ -50,6 +50,7 @@ import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.tabLabel
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
+import xyz.yihaozhan.app.data.UpdateRepo
 
 /**
  * 设置页 —— 主题、字号、启动页、自动更新、缓存、关于。
@@ -67,6 +68,15 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
         runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
         }.getOrNull() ?: "1.1"
+    }
+
+    /* 装更新：系统没给「安装未知应用」权限就先跳去开关页，别让用户对着「没反应」发呆 */
+    val installUpdate: () -> Unit = {
+        val apk = vm.upd.apk
+        if (apk != null) {
+            if (UpdateRepo.canInstall(ctx)) UpdateRepo.install(ctx, apk)
+            else UpdateRepo.openInstallSetting(ctx)
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -313,6 +323,15 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
             item {
                 SettingCard {
                     InfoRow("版本", "壹号栈 $version")
+                    Spacer(Modifier.height(10.dp))
+                    UpdateRow(
+                        upd = vm.upd,
+                        myVersion = vm.myVersion.ifBlank { version },
+                        onCheck = { vm.checkUpdate(silent = false) },
+                        onDownload = { vm.downloadUpdate() },
+                        onInstall = { installUpdate() }
+                    )
+                    Spacer(Modifier.height(10.dp))
                     InfoRow(
                         "数据来源",
                         "mackxin.github.io/xingyu",

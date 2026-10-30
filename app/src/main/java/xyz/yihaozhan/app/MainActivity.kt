@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -60,6 +61,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Prefs
+import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.FeedScreen
@@ -68,6 +70,7 @@ import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.PostDetailScreen
 import xyz.yihaozhan.app.ui.PullRefresh
+import xyz.yihaozhan.app.ui.UpdateDialog
 import xyz.yihaozhan.app.ui.PostsScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
@@ -113,6 +116,7 @@ fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AppRoot(vm: MainVm, prefs: Prefs) {
+    val context = LocalContext.current
     val ui = vm.ui
     /* 只在设置里改过顺序/显隐时才重算：visibleTabs 是 getter，
        不 remember 的话每次重组都新造一个 List，底栏和无障碍树跟着白刷一遍。 */
@@ -227,6 +231,23 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
                 }
             }
         }
+    }
+
+    /* 发现新版就弹一次；点「稍后」会把 latest 清掉，这次打开不再打扰（下次启动还会问） */
+    if (vm.upd.latest != null) {
+        UpdateDialog(
+            upd = vm.upd,
+            myVersion = vm.myVersion,
+            onLater = { vm.dismissUpdate() },
+            onDownload = { vm.downloadUpdate() },
+            onInstall = {
+                val apk = vm.upd.apk
+                if (apk != null) {
+                    if (UpdateRepo.canInstall(context)) UpdateRepo.install(context, apk)
+                    else UpdateRepo.openInstallSetting(context)
+                }
+            }
+        )
     }
 }
 

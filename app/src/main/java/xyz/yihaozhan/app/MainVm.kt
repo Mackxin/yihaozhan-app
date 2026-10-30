@@ -10,6 +10,8 @@ import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
+import xyz.yihaozhan.app.data.UpdateRepo
+import xyz.yihaozhan.app.data.VersionInfo
 
 class MainVm(app: Application) : AndroidViewModel(app) {
 
@@ -22,13 +24,37 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         val lastSync: Long = 0L
     )
 
+    /**
+     * 自更新的状态机。
+     *
+     * idle → (查到了) latest != null → downloading → apk != null（等系统安装器接手）
+     * `latest` 只在**确实比本机新**时才非空，界面不用自己再比一遍。
+     */
+    data class Upd(
+        val checking: Boolean = false,
+        val latest: VersionInfo? = null,
+        val downloading: Boolean = false,
+        val progress: Float = 0f,
+        val apk: java.io.File? = null,
+        val error: String? = null
+    )
+
     var ui by mutableStateOf(Ui())
         private set
+
+    var upd by mutableStateOf(Upd())
+        private set
+
+    /** 本机版本号/版本名，比较和解显示都用它 */
+    val myCode: Int by lazy { UpdateRepo.installedCode(getApplication()) }
+    val myVersion: String by lazy { UpdateRepo.installedName(getApplication()) }
 
     private val prefs = Prefs.of(app)
 
     init {
         boot()
+        /* 启动顺手问一句有没有新版：就几十字节的 JSON，失败也不吭声 */
+        checkUpdate(silent = true)
     }
 
     /**
@@ -51,6 +77,51 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun refresh() = pull()
+
+    /* ------------------------------ 自更新 ------------------------------ */
+
+    /**
+     * 问一下有没有新版。
+     * silent = true 时不把「连不上」当错误报出来（启动时那次就是这么用的）。
+     */
+    fun checkUpdate(silent: Boolean = false) {
+        if (upd.checking || upd.downloading) return
+        viewModelScope.launch {
+            upd = upd.copy(checking = true, error = null)
+            val info = UpdateRepo.check(getApplication())
+            val newer = info?.takeIf { it.versionCode > myCode }
+            upd = upd.copy(
+                checking = false,
+                /* 拉不到（离线/超时）时保留上次查到的，但同样得比本机新才算 */
+                latest = newer ?: upd.latest?.takeIf { it.versionCode > myCode },
+                error = if (!silent && info == null) "连不上，过会儿再试" else null
+            )
+        }
+    }
+
+    /** 下安装包，进度写进 upd.progress */
+    fun downloadUpdate() {
+        val info = upd.latest ?: return
+        if (upd.downloading) return
+        viewModelScope.launch {
+            upd = upd.copy(downloading = true, progress = 0f, error = null, apk = null)
+            val f = UpdateRepo.download(getApplication(), info) { p ->
+                upd = upd.copy(progress = p)
+            }
+            upd = if (f != null) {
+                upd.copy(downloading = false, progress = 1f, apk = f, error = null)
+            } else {
+                upd.copy(downloading = false, progress = 0f, error = "下载失败，检查下网络再试")
+            }
+        }
+    }
+
+    /** 用户点了「稍后」：把这一版收起来，别一直杵着 */
+    fun dismissUpdate() {
+        if (upd.downloading) return
+        UpdateRepo.clearApk(getApplication())
+        upd = upd.copy(apk = null, progress = 0f, latest = null, error = null)
+    }
 
     private fun pull() {
         if (ui.refreshing) return
