@@ -88,14 +88,19 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         if (upd.checking || upd.downloading) return
         viewModelScope.launch {
             upd = upd.copy(checking = true, error = null)
-            val info = UpdateRepo.check(getApplication())
-            val newer = info?.takeIf { it.versionCode > myCode }
-            upd = upd.copy(
-                checking = false,
-                /* 拉不到（离线/超时）时保留上次查到的，但同样得比本机新才算 */
-                latest = newer ?: upd.latest?.takeIf { it.versionCode > myCode },
-                error = if (!silent && info == null) "连不上，过会儿再试" else null
-            )
+            try {
+                val info = UpdateRepo.check(getApplication())
+                val newer = info?.takeIf { it.versionCode > myCode }
+                upd = upd.copy(
+                    checking = false,
+                    /* 拉不到（离线/超时）时保留上次查到的，但同样得比本机新才算 */
+                    latest = newer ?: upd.latest?.takeIf { it.versionCode > myCode },
+                    error = if (!silent && info == null) "连不上，过会儿再试" else null
+                )
+            } catch (e: Throwable) {
+                /* 兜底：别让 checking 卡住，否则按钮永远转圈、再也点不动 */
+                upd = upd.copy(checking = false, error = if (silent) null else "连不上，过会儿再试")
+            }
         }
     }
 

@@ -46,6 +46,17 @@ object UpdateRepo {
             .build()
     }
 
+    /* 查版本只要一个两百来字节的 json，别跟下载共用一个三分钟的超时：
+       网络半死不活时（DNS 卡住、连上了不响应）界面会一直停在「正在检查」。
+       这里给一条短 leash，20 秒拿不到就当没网。 */
+    private val probeClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
     /** 本地当前版本号。比较大小用它，别比版本名字符串 */
     fun installedCode(ctx: Context): Int = runCatching {
         val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -63,13 +74,13 @@ object UpdateRepo {
 
     /** 问一下远端有没有新版。失败返回 null（没网就静静算了，别弹错） */
     suspend fun check(ctx: Context): VersionInfo? = withContext(Dispatchers.IO) {
-        if (!Repo.online(ctx)) return@withContext null
         runCatching {
+            if (!Repo.online(ctx)) return@runCatching null
             val req = okhttp3.Request.Builder()
                 .url("$VERSION_URL?t=" + System.currentTimeMillis())
                 .header("Cache-Control", "no-cache")
                 .build()
-            client.newCall(req).execute().use { resp ->
+            probeClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
                 val text = resp.body?.string().orEmpty()
                 if (text.isBlank()) return@use null
