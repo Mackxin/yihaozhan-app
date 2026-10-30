@@ -2,6 +2,8 @@ package xyz.yihaozhan.app.data
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -137,6 +139,14 @@ object UpdateRepo {
             }
         }.getOrNull()
     }
+
+    /** 现在是不是连着 Wi-Fi（或有线）。判断不出来就当作「不是」—— 宁可让用户手动放行 */
+    fun onWifi(ctx: Context): Boolean = runCatching {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return@runCatching false
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }.getOrDefault(false)
 
     /** 系统允许这个 App 安装别的应用吗（Android 8+ 要用户手动开一次） */
     fun canInstall(ctx: Context): Boolean =

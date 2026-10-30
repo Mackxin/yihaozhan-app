@@ -53,8 +53,9 @@ class MainVm(app: Application) : AndroidViewModel(app) {
 
     init {
         boot()
-        /* 启动顺手问一句有没有新版：就几十字节的 JSON，失败也不吭声 */
-        checkUpdate(silent = true)
+        /* 启动顺手问一句有没有新版：就几十字节的 JSON，失败也不吭声。
+           设置里关掉「启动时检查新版」就不问，从关于那一行手动点也一样能查。 */
+        if (prefs.autoCheckUpdate) checkUpdate(silent = true)
     }
 
     /**
@@ -108,6 +109,12 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     fun downloadUpdate() {
         val info = upd.latest ?: return
         if (upd.downloading) return
+        val ctx = getApplication<Application>()
+        /* 一个包 1.2 MB，流量党不该被悄悄扣：设置里没关这条，就等 Wi-Fi */
+        if (prefs.updateWifiOnly && !UpdateRepo.onWifi(ctx)) {
+            upd = upd.copy(error = "等连上 Wi-Fi 再下（设置里可以关掉这条）")
+            return
+        }
         viewModelScope.launch {
             upd = upd.copy(downloading = true, progress = 0f, error = null, apk = null)
             val f = UpdateRepo.download(getApplication(), info) { p ->

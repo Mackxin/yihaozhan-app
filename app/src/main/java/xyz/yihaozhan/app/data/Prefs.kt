@@ -46,6 +46,22 @@ class Prefs private constructor(ctx: Context) {
     var tabHidden by mutableStateOf(sp.getString("tabHidden", "") ?: "")
         private set
 
+    /** 链接在 App 内预览？关掉就直接调浏览器（要登录、要支付的站点更适合） */
+    var linkInApp by mutableStateOf(sp.getBoolean("linkInApp", true))
+        private set
+
+    /** 启动时自动问一句有没有新版 */
+    var autoCheckUpdate by mutableStateOf(sp.getBoolean("autoCheckUpdate", true))
+        private set
+
+    /** 只在 Wi-Fi 下下安装包（一个包 1.2 MB，流量党会骂） */
+    var updateWifiOnly by mutableStateOf(sp.getBoolean("updateWifiOnly", true))
+        private set
+
+    /** 导航页一进来就全部折起来，只看到分类目录 */
+    var navCollapsed by mutableStateOf(sp.getBoolean("navCollapsed", false))
+        private set
+
     fun updateTheme(v: String) {
         theme = v
         sp.edit().putString("theme", v).apply()
@@ -69,6 +85,26 @@ class Prefs private constructor(ctx: Context) {
     fun updateDockIcons(v: Boolean) {
         dockIcons = v
         sp.edit().putBoolean("dockIcons", v).apply()
+    }
+
+    fun updateLinkInApp(v: Boolean) {
+        linkInApp = v
+        sp.edit().putBoolean("linkInApp", v).apply()
+    }
+
+    fun updateAutoCheckUpdate(v: Boolean) {
+        autoCheckUpdate = v
+        sp.edit().putBoolean("autoCheckUpdate", v).apply()
+    }
+
+    fun updateUpdateWifiOnly(v: Boolean) {
+        updateWifiOnly = v
+        sp.edit().putBoolean("updateWifiOnly", v).apply()
+    }
+
+    fun updateNavCollapsed(v: Boolean) {
+        navCollapsed = v
+        sp.edit().putBoolean("navCollapsed", v).apply()
     }
 
     /* ---------------- 底栏排序 / 显隐 ---------------- */

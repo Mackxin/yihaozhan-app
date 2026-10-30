@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -294,7 +295,12 @@ fun PostDetailScreen(
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Unit) {
+fun LinksScreen(
+    data: AppPayload,
+    onOpen: (String) -> Unit,
+    onSettings: () -> Unit,
+    startCollapsed: Boolean = false
+) {
     var q by remember { mutableStateOf("") }
 
     val pal = LocalXyPal.current
@@ -317,13 +323,18 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
     /* 只记「折起来的分类 id」，空着就等于全展开；
        比给每个分类存一个开关省事，加新分类也不用补默认值。
        用 rememberSaveable 存成 Set：翻几页再回来、转个屏，折叠状态还在 */
-    var foldedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var foldedIds by rememberSaveable {
+        mutableStateOf(if (startCollapsed) cats.map { it.id }.toSet() else emptySet())
+    }
     fun isOpen(id: String) = searching || id !in foldedIds
 
-    /* 搜索时一律展开（不然搜到的东西被折起来看不见，等于白搜） */
     fun setAll(open: Boolean) {
         foldedIds = if (open) emptySet() else groups.map { it.first.id }.toSet()
     }
+
+    /* 全展开还是全折叠，一个按钮切；文案跟着当前状态变，点一下就是「另一头」 */
+    val allOpen = groups.isNotEmpty() && groups.all { isOpen(it.first.id) }
+    val toggleAll: () -> Unit = { setAll(!allOpen) }
 
     /* 列表条目会随搜索整批换掉，不重置滚动位置就会停在新结果的中段 */
     val listState = rememberLazyListState()
@@ -334,13 +345,15 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
             "导航",
             "随手翻的一堆站点，按分类收好。",
             meta = "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
-            onSettings = onSettings
+            onSettings = onSettings,
+            /* 点标题也能全部展开/折叠 —— 拇指够得着，比去右上角找按钮省事 */
+            onTitleClick = { if (!searching) toggleAll() }
         )
         SearchField(q, { q = it }, "搜站点名、描述、网址", Modifier.padding(horizontal = 20.dp))
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -348,20 +361,18 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                 fontSize = 11.5.sp, color = pal.mute
             )
             Spacer(Modifier.weight(1f))
-            /* 搜索时是强制展开的，这两个按钮就没意义了 */
+            /* 搜索时是强制展开的，这个按钮就没意义了 */
             if (!searching) {
-                TinyBtn("全部展开") { setAll(true) }
-                Spacer(Modifier.width(6.dp))
-                TinyBtn("全部折叠") { setAll(false) }
+                TinyBtn(if (allOpen) "全部折叠" else "全部展开", toggleAll)
             }
         }
         if (groups.isEmpty()) {
             EmptyState("🔍", "没找到", "换个关键词试试。")
         } else {
             /*
-             * 分类标题 + 该分类的链接，一节一节往下排；标题点一下折叠/展开。
-             * 每一行链接都是独立的懒加载条目（不是把整节塞进一个 item），
-             * 全部展开时有四百多张卡，只有这样才不卡。
+             * 分类标题 + 该分类的链接（流式小标签），一节一节往下排；点标题折叠/展开。
+             * 一节 = 两个懒加载条目（标题、内容），所以五十个分类也只有百来个 item；
+             * 每节里面的标签是一次排完的 —— 多的分类上百个，少的几个，量级扛得住。
              */
             LazyColumn(
                 state = listState,
@@ -384,14 +395,19 @@ fun LinksScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Un
                         )
                     }
                     if (isOpen(cat.id)) {
-                        val rows = links.chunked(2)
-                        rows.forEachIndexed { ri, pair ->
-                            item(key = "R|" + cat.id + "|" + ri) {
-                                LinkRow(pair, onOpen)
+                        item(key = "B|" + cat.id) {
+                            FlowRow(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp, start = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                verticalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                links.forEach { l -> LinkChip(l, onOpen) }
                             }
                         }
                     }
-                    item(key = "S|" + cat.id) { Spacer(Modifier.height(14.dp)) }
+                    item(key = "S|" + cat.id) { Spacer(Modifier.height(12.dp)) }
                 }
             }
         }
@@ -457,29 +473,40 @@ private fun CatHeader(
     }
 }
 
-/** 一行两张卡；只有一张时右边留白，别让它撑成整行宽 */
+/**
+ * 导航里的一个站点：只留名字的流式小标签，宽度由名字长短决定。
+ * 之前那个「图标 + 名字 + 三行描述」的卡片在手机上太重了 —— 一屏只能看四五个，
+ * 两千个站点翻不到头；换成标签之后一屏能扫几十个，图标也省了（网站 favicon 拉不到，
+ * 用的都是 emoji，反而花）。
+ */
 @Composable
-private fun LinkRow(pair: List<LinkItem>, onOpen: (String) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        pair.forEach { l ->
-            Box(Modifier.weight(1f)) { LinkCard("", l, onOpen, showCat = false) }
-        }
-        if (pair.size == 1) Spacer(Modifier.weight(1f))
-    }
+private fun LinkChip(link: LinkItem, onOpen: (String) -> Unit) {
+    val pal = LocalXyPal.current
+    Text(
+        link.name,
+        fontSize = 12.5.sp,
+        lineHeight = 17.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        color = pal.text,
+        modifier = Modifier
+            .clip(RoundedCornerShape(XyR.sm.dp))
+            .background(pal.glass)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onOpen(link.url) }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    )
 }
 
-/** 「全部展开 / 全部折叠」这种小胶囊按钮 */
+/** 「全部展开 / 全部折叠」那颗小胶囊 */
 @Composable
 private fun TinyBtn(text: String, onClick: () -> Unit) {
     val pal = LocalXyPal.current
     Text(
         text,
-        fontSize = 11.sp,
+        fontSize = 11.5.sp,
         color = pal.dim,
         modifier = Modifier
             .clip(RoundedCornerShape(99.dp))
@@ -488,170 +515,14 @@ private fun TinyBtn(text: String, onClick: () -> Unit) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onClick() }
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .padding(horizontal = 11.dp, vertical = 6.dp)
     )
-}
-
-/** 导航卡片：竖着排，图标 + 名字 + 描述，高度自然跟着内容变 */
-@Composable
-private fun LinkCard(
-    catName: String,
-    link: LinkItem,
-    onOpen: (String) -> Unit,
-    showCat: Boolean = true
-) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(XyR.md.dp))
-            .background(LocalXyPal.current.glass)
-            .padding(horizontal = 12.dp, vertical = 12.dp)
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { onOpen(link.url) },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(30.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(link.icon.ifBlank { link.name.take(1) }, fontSize = 15.sp)
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                link.name, fontSize = 13.5.sp, lineHeight = 19.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        if (link.desc.isNotBlank()) {
-            Spacer(Modifier.height(7.dp))
-            Text(
-                link.desc,
-                fontSize = 11.5.sp, lineHeight = 17.sp,
-                maxLines = 3, overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        /* 已经按分类筛过时不用每张卡再喊一遍分类名 */
-        if (showCat) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                catName,
-                fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                    .padding(horizontal = 7.dp, vertical = 2.dp)
-            )
-        }
-    }
-}
-
-/* ============================ 关于 ============================ */
-
-@Composable
-fun AboutScreen(vm: MainVm, onOpen: (String) -> Unit, onSettings: () -> Unit) {
-    val ui = vm.ui
-    val data = ui.data ?: return
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp)
-    ) {
-        /* 站名和标语首页已经喊过一遍了，这里不再重复，只留站点说明 */
-        PageHeader("关于", subtitle = data.site.slogan.ifBlank { null }, onSettings = onSettings)
-        LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-            item {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (data.site.desc.isNotBlank()) {
-                        Spacer(Modifier.height(14.dp))
-                        Text(
-                            data.site.desc, fontSize = 13.5.sp, lineHeight = 22.sp,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (data.site.since.isNotBlank()) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            data.site.since, fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-            item {
-                Spacer(Modifier.height(22.dp))
-                CardBox {
-                    Text("内容更新", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if (ui.offline) "现在没网，正在看手机里存的那一份。"
-                        else "每次打开都会自动拉最新的：不用点、不用等。",
-                        fontSize = 13.sp, lineHeight = 21.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "上次同步：" + lastSyncText(ui.lastSync) + " · 数据版本 " + data.build,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { vm.refresh() }, enabled = !ui.refreshing) {
-                            if (ui.refreshing) {
-                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                            } else {
-                                Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (ui.refreshing) "正在拉最新…" else "立即检查更新", fontSize = 13.sp)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        if (ui.offline) {
-                            Icon(
-                                Icons.Rounded.CloudOff, null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text("离线", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-            item {
-                Spacer(Modifier.height(12.dp))
-                CardBox(onClick = { onOpen(data.site.url) }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("在浏览器里打开网站", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        Icon(
-                            Icons.Rounded.ArrowOutward, null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
 }
 
 /* ============================ 工具 ============================ */
 
 private fun prettyDate(iso: String): String {
+
     if (iso.length < 10) return iso
     return runCatching {
         val d = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).parse(iso.substring(0, 10))

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,7 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -69,9 +72,13 @@ fun openUrl(ctx: Context, url: String) {
 }
 
 /**
- * 页面标题区：跟站点 .page-head 一个规格 —— h1 30sp / 字重 800 / 字距 -0.02em，
- * 说明行 13sp 次要色，小字 11.5sp 更淡一档；全部居中。
- * 左右各留 64dp：短标题不会跟左上汉堡、右上齿轮挤在一起，居中也不偏。
+ * 页面标题区：跟站点 .page-head 一个规格 —— h1 字重 800 / 字距 -0.02em，
+ * 说明行次要色，小字更淡一档；全部居中。
+ *
+ * 字号和留白按**手机端**那一档收着来：手机屏窄，30sp 的大标题加 16dp 下留白
+ * 会白白吃掉四分之一屏；26sp + 12dp 更接近手机网站上的观感，内容的头一行能多露一点。
+ *
+ * 左右各留 56dp：短标题不会跟左上返回/汉堡、右上齿轮挤在一起，居中也不偏。
  */
 @Composable
 fun PageHeader(
@@ -79,38 +86,50 @@ fun PageHeader(
     subtitle: String? = null,
     meta: String? = null,
     onSettings: (() -> Unit)? = null,
-    leading: @Composable (() -> Unit)? = null
+    leading: @Composable (() -> Unit)? = null,
+    onTitleClick: (() -> Unit)? = null
 ) {
     val pal = LocalXyPal.current
-    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 16.dp)) {
+    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 12.dp)) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 64.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 title,
-                fontSize = 30.sp,
-                lineHeight = 38.sp,
+                fontSize = 26.sp,
+                lineHeight = 33.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.02).em,
                 textAlign = TextAlign.Center,
-                color = pal.text
+                color = pal.text,
+                /* 导航页点标题就能全部展开/折叠，所以标题本身要能点；
+                   别的页面不给回调，就只是一行字 */
+                modifier = if (onTitleClick != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTitleClick() }
+                        .padding(horizontal = 8.dp)
+                } else Modifier
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     subtitle,
-                    fontSize = 13.sp,
-                    lineHeight = 21.sp,
+                    fontSize = 12.5.sp,
+                    lineHeight = 20.sp,
                     textAlign = TextAlign.Center,
                     color = pal.dim
                 )
             }
             if (!meta.isNullOrBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     meta,
-                    fontSize = 11.5.sp,
+                    fontSize = 11.sp,
                     letterSpacing = 0.02.em,
                     textAlign = TextAlign.Center,
                     color = pal.mute
@@ -169,7 +188,13 @@ fun SectionTitle(text: String, action: String? = null, onAction: (() -> Unit)? =
     }
 }
 
-/** 搜索框：只用 BasicTextField 自绘，玻璃底 + 全圆角（站点 .searchbox 的样子） */
+/**
+ * 搜索框：只用 BasicTextField 自绘，玻璃底 + 全圆角（站点 .searchbox 的样子）。
+ *
+ * 失焦就把输入法收掉：手机上一旦弹过键盘，切页/点别处后它还杵在那儿挡半屏，
+ * 是最烦的一种「不听话」。这里在聚焦状态变化时主动 hide，
+ * 外层还有一层「点空白处清焦点」，两头都堵上。
+ */
 @Composable
 fun SearchField(
     value: String,
@@ -178,6 +203,7 @@ fun SearchField(
     modifier: Modifier = Modifier
 ) {
     val pal = LocalXyPal.current
+    val keyboard = LocalSoftwareKeyboardController.current
     Row(
         modifier
             .fillMaxWidth()
@@ -202,8 +228,10 @@ fun SearchField(
                 singleLine = true,
                 textStyle = LocalTextStyle.current.copy(fontSize = 13.5.sp, color = pal.text),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {}),
-                modifier = Modifier.fillMaxWidth()
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { st -> if (!st.isFocused) keyboard?.hide() }
             )
         }
         if (value.isNotEmpty()) {

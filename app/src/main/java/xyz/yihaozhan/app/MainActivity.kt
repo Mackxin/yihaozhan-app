@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +31,7 @@ import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,7 +52,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,7 +66,6 @@ import kotlinx.coroutines.launch
 import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
-import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.FeedScreen
 import xyz.yihaozhan.app.ui.HomeScreen
@@ -108,7 +111,7 @@ private val TABS = listOf(
     Tab(1, "分享", Icons.Rounded.Bolt),
     Tab(2, "文章", Icons.AutoMirrored.Rounded.MenuBook),
     Tab(3, "导航", Icons.Rounded.GridView),
-    Tab(4, "关于", Icons.Rounded.Info)
+    Tab(4, "设置", Icons.Rounded.Settings)
 )
 
 fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
@@ -122,12 +125,18 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
        不 remember 的话每次重组都新造一个 List，底栏和无障碍树跟着白刷一遍。 */
     val visible = remember(prefs.tabOrder, prefs.tabHidden) { prefs.visibleTabs }
     var openPost by remember { mutableStateOf<Post?>(null) }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
     var webUrl by rememberSaveable { mutableStateOf<String?>(null) }
 
-    /* 站外链接一律在 App 内预览；真要浏览器（登录、支付）由预览页那颗按钮转出去 */
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    /* 站外链接：默认 App 内预览；设置里关掉「链接在 App 内打开」就直接丢给浏览器 */
     val external = rememberOpener()
-    val open: (String) -> Unit = { u -> if (u.isNotBlank()) webUrl = u }
+    val open: (String) -> Unit = { u ->
+        if (u.isNotBlank()) {
+            if (prefs.linkInApp) webUrl = u else external(u)
+        }
+    }
 
     val scope = rememberCoroutineScope()
     val pager = rememberPagerState(
@@ -142,6 +151,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
     /* 底栏被改过（隐藏/换序）之后页数会变，把位置夹回范围内 */
     LaunchedEffect(prefs.tabOrder, prefs.tabHidden) {
         if (pager.currentPage > visible.lastIndex) pager.scrollToPage(visible.lastIndex)
+    }
+
+    /* 换页就把输入法收掉：搜索框已经不在了，键盘还杵着挡半屏最烦 */
+    LaunchedEffect(curId) {
+        focus.clearFocus()
+        keyboard?.hide()
     }
 
     /* 隔了一页以上就瞬移，不 animate —— 动画会把中间那几页拖过去一遍，
@@ -159,17 +174,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
         val i = visible.indexOf(id)
         if (i >= 0) {
             openPost = null
-            showSettings = false
             webUrl = null
             goPage(i)
         }
     }
 
-    /* 返回键：网页 → 设置 → 阅读，一层层退，退完才退出 App */
-    BackHandler(enabled = webUrl != null || showSettings || openPost != null) {
+    /* 返回键：先退网页预览，再退阅读页，退完才退出 App */
+    BackHandler(enabled = webUrl != null || openPost != null) {
         when {
             webUrl != null -> webUrl = null
-            showSettings -> showSettings = false
             else -> openPost = null
         }
     }
@@ -178,7 +191,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
         /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
         containerColor = Color.Transparent,
         bottomBar = {
-            if (openPost == null && !showSettings && webUrl == null) {
+            if (openPost == null && webUrl == null) {
                 BottomDock(
                     position = dockPos,
                     current = curId,
@@ -191,17 +204,28 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
             }
         }
     ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(pad)
+                /* 点空白处就收键盘：这里能收到 tap 只说明「没人认领这次点击」——
+                   输入框、卡片这些自己会消费按下事件，所以不会误伤 */
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focus.clearFocus()
+                        keyboard?.hide()
+                    })
+                }
+        ) {
             val data = ui.data
             when {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
                 webUrl != null -> WebScreen(webUrl!!, { webUrl = null }, external)
-                showSettings -> SettingsScreen(prefs, vm, { showSettings = false }, open)
                 openPost != null -> PostDetailScreen(
                     openPost!!, { openPost = null }, open, prefs.fontScale
                 )
-                /* 下拉刷新只包在五个内容页上：网页预览 / 设置 / 阅读页下拉没意义 */
+                /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
                 else -> PullRefresh(
                     refreshing = ui.refreshing,
                     onRefresh = { vm.refresh() }
@@ -217,15 +241,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs) {
                             0 -> HomeScreen(
                                 data = data,
                                 offline = ui.offline,
-                                onSettings = { showSettings = true },
+                                onSettings = { goTab(4) },
                                 onOpen = open,
                                 onGoTab = goTab,
                                 onOpenPost = { openPost = it }
                             )
-                            1 -> FeedScreen(data, open) { showSettings = true }
-                            2 -> PostsScreen(data, { openPost = it }) { showSettings = true }
-                            3 -> LinksScreen(data, open) { showSettings = true }
-                            else -> AboutScreen(vm, open) { showSettings = true }
+                            1 -> FeedScreen(data, open) { goTab(4) }
+                            2 -> PostsScreen(data, { openPost = it }) { goTab(4) }
+                            3 -> LinksScreen(data, open, { goTab(4) }, prefs.navCollapsed)
+                            else -> SettingsScreen(prefs, vm, open)
                         }
                     }
                 }

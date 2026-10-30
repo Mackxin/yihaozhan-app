@@ -3,6 +3,7 @@ package xyz.yihaozhan.app.ui
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,22 +13,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -40,26 +37,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.tabLabel
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
 import xyz.yihaozhan.app.data.UpdateRepo
+import kotlin.math.roundToInt
 
 /**
- * 设置页 —— 主题、字号、启动页、自动更新、缓存、关于。
+ * 设置页 —— 外观、阅读、导航、底栏、内容更新、App 更新、存储、关于。
+ *
+ * 它是**底栏上的一个页面**（1.7 起），不是弹出来的浮层：能左右滑过来，也能被记住成启动页。
+ * 原来那个独立的「关于」页整块并到最下面一组，省掉一个 tab。
  *
  * 每一项都是真接上了的：改主题当场换配色，改字号文章正文立刻变，
  * 启动页下次打开生效，清缓存真的删文件。没有摆设开关。
  */
 @Composable
-fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String) -> Unit) {
+fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit) {
     val ui = vm.ui
     val data = ui.data
     val ctx = LocalContext.current
@@ -67,7 +71,7 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
     val version = remember {
         runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
-        }.getOrNull() ?: "1.1"
+        }.getOrNull() ?: "1.2"
     }
 
     /* 装更新：系统没给「安装未知应用」权限就先跳去开关页，别让用户对着「没反应」发呆 */
@@ -80,20 +84,7 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
     }
 
     Column(Modifier.fillMaxSize()) {
-        /* 顶栏：返回 + 居中标题 */
-        Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp)) {
-            Text(
-                "设置",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.01).em,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).fillMaxWidth()
-            )
-            IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回")
-            }
-        }
+        PageHeader("设置", "外观、阅读、底栏、更新都在这里。")
 
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -124,7 +115,10 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
             item {
                 SettingCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("正文字号", fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(
+                            "正文字号", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
                         Text(
                             prefs.fontSizeName, fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -145,6 +139,44 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
                 }
             }
 
+            /* ---------------- 导航 ---------------- */
+            item { GroupTitle("导航") }
+            item {
+                SettingCard {
+                    SwitchRow(
+                        title = "进来先折叠",
+                        desc = "只看到分类目录，点哪个展开哪个（默认全部展开）",
+                        checked = prefs.navCollapsed
+                    ) { prefs.updateNavCollapsed(it) }
+                    Spacer(Modifier.height(8.dp))
+                    HairLine()
+                    Spacer(Modifier.height(8.dp))
+                    SwitchRow(
+                        title = "链接在 App 内打开",
+                        desc = "关掉就直接跳浏览器（要登录的站点建议开着）",
+                        checked = prefs.linkInApp
+                    ) { prefs.updateLinkInApp(it) }
+                }
+            }
+
+            /* ---------------- 底部标签栏 ---------------- */
+            item { GroupTitle("底部标签栏") }
+            item {
+                SettingCard {
+                    SwitchRow(
+                        title = "显示图标",
+                        desc = "默认关：只留文字，底栏更矮",
+                        checked = prefs.dockIcons
+                    ) { prefs.updateDockIcons(it) }
+                    Spacer(Modifier.height(10.dp))
+                    HairLine()
+                    Spacer(Modifier.height(8.dp))
+                    Text("排序与显示", fontSize = 12.5.sp, color = LocalXyPal.current.mute)
+                    Spacer(Modifier.height(2.dp))
+                    TabOrderEditor(prefs)
+                }
+            }
+
             /* ---------------- 启动 ---------------- */
             item { GroupTitle("启动") }
             item {
@@ -157,90 +189,10 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
                     )
                     Spacer(Modifier.height(10.dp))
                     Segmented(
-                        options = listOf("首页", "分享", "文章", "导航", "关于"),
+                        options = listOf("首页", "分享", "文章", "导航", "设置"),
                         selected = prefs.startTab,
                         compact = true
                     ) { prefs.updateStartTab(it) }
-                }
-            }
-
-            /* ---------------- 底部标签栏 ---------------- */
-            item { GroupTitle("底部标签栏") }
-            item {
-                SettingCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("显示图标", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                "默认关：只留文字，底栏更矮",
-                                fontSize = 11.5.sp,
-                                color = LocalXyPal.current.mute
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = prefs.dockIcons, onCheckedChange = { prefs.updateDockIcons(it) })
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    HairLine()
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "排序与显示",
-                        fontSize = 12.5.sp,
-                        color = LocalXyPal.current.mute
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    prefs.tabsInOrder.forEachIndexed { idx, id ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                tabLabel(id),
-                                fontSize = 13.5.sp,
-                                fontWeight = if (id in prefs.hiddenSet) FontWeight.Normal else FontWeight.Medium,
-                                color = if (id in prefs.hiddenSet) LocalXyPal.current.mute
-                                else LocalXyPal.current.text,
-                                modifier = Modifier.weight(1f)
-                            )
-                            /* 上下移：顺序就是底栏从左到右 */
-                            IconButton(
-                                onClick = { prefs.moveTab(id, -1) },
-                                enabled = idx > 0,
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.KeyboardArrowUp, "上移",
-                                    tint = if (idx > 0) LocalXyPal.current.dim else LocalXyPal.current.outline,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = { prefs.moveTab(id, 1) },
-                                enabled = idx < prefs.tabsInOrder.lastIndex,
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.KeyboardArrowDown, "下移",
-                                    tint = if (idx < prefs.tabsInOrder.lastIndex) LocalXyPal.current.dim
-                                    else LocalXyPal.current.outline,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            Switch(
-                                checked = id !in prefs.hiddenSet,
-                                enabled = prefs.canHide(id),
-                                onCheckedChange = { prefs.setTabHidden(id, !it) }
-                            )
-                        }
-                    }
-                    Text(
-                        "至少留一个，最后一个的开关会锁住",
-                        fontSize = 11.sp,
-                        color = LocalXyPal.current.mute,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
                 }
             }
 
@@ -248,21 +200,13 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
             item { GroupTitle("内容更新") }
             item {
                 SettingCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("打开时自动拉最新", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                "关掉之后只在手动点「立即同步」时联网",
-                                fontSize = 11.5.sp, lineHeight = 17.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = prefs.autoSync, onCheckedChange = { prefs.updateAutoSync(it) })
-                    }
+                    SwitchRow(
+                        title = "打开时自动拉最新",
+                        desc = "关掉之后只在手动点「立即同步」时联网",
+                        checked = prefs.autoSync
+                    ) { prefs.updateAutoSync(it) }
                     Spacer(Modifier.height(6.dp))
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                    HairLine()
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { vm.refresh() }, enabled = !ui.refreshing) {
@@ -287,6 +231,34 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
                             (data?.let { " · 数据版本 " + it.build } ?: ""),
                         fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            /* ---------------- App 更新 ---------------- */
+            item { GroupTitle("App 更新") }
+            item {
+                SettingCard {
+                    SwitchRow(
+                        title = "启动时检查新版",
+                        desc = "发现新版会弹一次，点「稍后」这次就不打扰",
+                        checked = prefs.autoCheckUpdate
+                    ) { prefs.updateAutoCheckUpdate(it) }
+                    Spacer(Modifier.height(6.dp))
+                    SwitchRow(
+                        title = "只在 Wi-Fi 下下载",
+                        desc = "一个安装包 1.2 MB，用流量时就先等着",
+                        checked = prefs.updateWifiOnly
+                    ) { prefs.updateUpdateWifiOnly(it) }
+                    Spacer(Modifier.height(6.dp))
+                    HairLine()
+                    Spacer(Modifier.height(6.dp))
+                    UpdateRow(
+                        upd = vm.upd,
+                        myVersion = vm.myVersion.ifBlank { version },
+                        onCheck = { vm.checkUpdate(silent = false) },
+                        onDownload = { vm.downloadUpdate() },
+                        onInstall = { installUpdate() }
                     )
                 }
             }
@@ -318,31 +290,41 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onBack: () -> Unit, onOpen: (String
                 }
             }
 
-            /* ---------------- 关于 ---------------- */
+            /* ---------------- 关于（原来的独立页，整块搬进来） ---------------- */
             item { GroupTitle("关于") }
             item {
                 SettingCard {
-                    InfoRow("版本", "壹号栈 $version")
-                    Spacer(Modifier.height(10.dp))
-                    UpdateRow(
-                        upd = vm.upd,
-                        myVersion = vm.myVersion.ifBlank { version },
-                        onCheck = { vm.checkUpdate(silent = false) },
-                        onDownload = { vm.downloadUpdate() },
-                        onInstall = { installUpdate() }
-                    )
-                    Spacer(Modifier.height(10.dp))
+                    if (!data?.site?.desc.isNullOrBlank()) {
+                        Text(
+                            data!!.site.desc,
+                            fontSize = 13.sp, lineHeight = 21.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (!data?.site?.since.isNullOrBlank()) {
+                        Text(
+                            data!!.site.since,
+                            fontSize = 11.5.sp, color = LocalXyPal.current.mute
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    /* 版本号只在「App 更新」组里说一次，这里不再重复 */
                     InfoRow(
                         "数据来源",
                         "mackxin.github.io/xingyu",
-                        onClick = { onOpen("https://mackxin.github.io/xingyu/") }
+                        onClick = { onOpen(data?.site?.url ?: "https://mackxin.github.io/xingyu/") }
                     )
                     InfoRow(
                         "开源仓库",
                         "github.com/Mackxin/yihaozhan-app",
                         onClick = { onOpen("https://github.com/Mackxin/yihaozhan-app") }
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(10.dp))
+                    CardAction("在浏览器里打开网站") {
+                        onOpen(data?.site?.url ?: "https://mackxin.github.io/xingyu/")
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         "内容每次打开自动更新，离线也能看。这里只读不写，改内容在站点后台。",
                         fontSize = 11.5.sp, lineHeight = 18.sp,
@@ -377,6 +359,30 @@ private fun SettingCard(content: @Composable () -> Unit) {
             .background(LocalXyPal.current.glass)
             .padding(horizontal = 15.dp, vertical = 15.dp)
     ) { content() }
+}
+
+/** 左边两行字、右边一个开关 —— 设置页里出现最多次的那种行 */
+@Composable
+private fun SwitchRow(
+    title: String,
+    desc: String?,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            if (!desc.isNullOrBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    desc, fontSize = 11.5.sp, lineHeight = 17.sp,
+                    color = LocalXyPal.current.mute
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onChecked)
+    }
 }
 
 /** 分段选择：一排等宽胶囊，选中的填主色 */
@@ -428,6 +434,87 @@ private fun Segmented(
     }
 }
 
+/**
+ * 底栏按钮的排序与显隐：**长按一行就能拖**，拖到哪儿哪儿就是它的新位置。
+ * 原来那对上下箭头一次只能挪一格，五个 tab 想把最后一个顶到最前要点八下。
+ *
+ * 手势用 `detectDragGesturesAfterLongPress`：长按超过阈值才接管，
+ * 平时按下去不会跟外面 LazyColumn 的滚动打架（它会 consume，父级就收不到）。
+ */
+@Composable
+private fun TabOrderEditor(prefs: Prefs) {
+    val pal = LocalXyPal.current
+    val rowH = 46.dp
+    val step = with(LocalDensity.current) { rowH.toPx() }
+    var dragId by remember { mutableStateOf<Int?>(null) }
+    var dragDy by remember { mutableStateOf(0f) }
+
+    Column(Modifier.fillMaxWidth()) {
+        prefs.tabsInOrder.forEach { id ->
+            val dragging = dragId == id
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(rowH)
+                    .zIndex(if (dragging) 2f else 0f)
+                    .offset { IntOffset(0, if (dragging) dragDy.roundToInt() else 0) }
+                    .clip(RoundedCornerShape(12.dp))
+                    .then(if (dragging) Modifier.background(pal.glassHi) else Modifier)
+                    .pointerInput(id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                dragId = id
+                                dragDy = 0f
+                            },
+                            onDragEnd = {
+                                dragId = null
+                                dragDy = 0f
+                            },
+                            onDragCancel = {
+                                dragId = null
+                                dragDy = 0f
+                            }
+                        ) { change, delta ->
+                            change.consume()
+                            dragDy += delta.y
+                            val cur = prefs.tabsInOrder.indexOf(id)
+                            if (dragDy > step * 0.6f && cur < prefs.tabsInOrder.lastIndex) {
+                                prefs.moveTab(id, 1)
+                                dragDy -= step
+                            } else if (dragDy < -step * 0.6f && cur > 0) {
+                                prefs.moveTab(id, -1)
+                                dragDy += step
+                            }
+                        }
+                    }
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("≡", fontSize = 16.sp, color = pal.mute)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    tabLabel(id),
+                    fontSize = 13.5.sp,
+                    fontWeight = if (id in prefs.hiddenSet) FontWeight.Normal else FontWeight.Medium,
+                    color = if (id in prefs.hiddenSet) pal.mute else pal.text,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = id !in prefs.hiddenSet,
+                    enabled = prefs.canHide(id),
+                    onCheckedChange = { prefs.setTabHidden(id, !it) }
+                )
+            }
+        }
+        Text(
+            "长按一行拖动换位置；开关决定它露不露脸，至少留一个",
+            fontSize = 11.sp,
+            color = pal.mute,
+            modifier = Modifier.padding(top = 4.dp, start = 8.dp)
+        )
+    }
+}
+
 @Composable
 private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null) {
     Row(
@@ -437,7 +524,10 @@ private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null)
             .padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontSize = 13.sp, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            label, fontSize = 13.sp, modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Text(
             value, fontSize = 12.5.sp,
             color = if (onClick != null) MaterialTheme.colorScheme.primary
@@ -451,6 +541,28 @@ private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null)
                 modifier = Modifier.size(13.dp)
             )
         }
+    }
+}
+
+/** 卡片最下面的那颗宽按钮，比如「在浏览器里打开网站」 */
+@Composable
+private fun CardAction(text: String, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(pal.glassHi)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Icon(
+            Icons.Rounded.ArrowOutward, null,
+            tint = pal.dim,
+            modifier = Modifier.size(15.dp)
+        )
     }
 }
 
