@@ -19,7 +19,19 @@ data class RecentLink(
 )
 
 /**
- * 「我自己产生的那部分数据」—— 收藏、稍后读、最近打开、读到哪了。
+ * 灵感随记的一条。跟站点 `#/idea` 那页同一个形状：正文 + 时间 + 置顶，
+ * 标签不单独存 —— 从正文里的 `#xxx` 现抠，改正文标签就跟着变。
+ */
+@Serializable
+data class Idea(
+    val id: String = "",
+    val text: String = "",
+    val ts: Long = 0L,
+    val pinned: Boolean = false
+)
+
+/**
+ * 「我自己产生的那部分数据」—— 收藏、稍后读、最近打开、读到哪了、灵感随记。
  *
  * 为什么不跟站点数据混在一起：`app.json` 是站点后台的内容，对所有人生效、只读；
  * 这一份纯属本机，换手机就没了，也绝不上传。两者混在一个文件里，
@@ -121,6 +133,61 @@ class Local private constructor(ctx: Context) {
         sp.edit().remove("pos").apply()
     }
 
+    /* ------------------------------ 灵感随记 ------------------------------ */
+
+    /**
+     * 已排好序：置顶的在前，其余按时间倒序。
+     * 排序放在 getter 里做，写入口就只管存原始顺序，改置顶/改正文都不会乱。
+     */
+    var ideas: List<Idea> by mutableStateOf(readIdeas())
+        private set
+
+    val sortedIdeas: List<Idea>
+        get() = ideas.sortedWith(
+            compareByDescending<Idea> { it.pinned }.thenByDescending { it.ts }
+        )
+
+    fun addIdea(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        val one = Idea(
+            id = "i-" + System.currentTimeMillis().toString(36),
+            text = t,
+            ts = System.currentTimeMillis()
+        )
+        ideas = listOf(one) + ideas
+        saveIdeas()
+        return true
+    }
+
+    /** 改正文：时间不动（跟站点一致，编辑不算新写一条） */
+    fun updateIdea(id: String, text: String): Boolean {
+        val t = text.trim()
+        if (id.isBlank() || t.isEmpty()) return false
+        ideas = ideas.map { if (it.id == id) it.copy(text = t) else it }
+        saveIdeas()
+        return true
+    }
+
+    fun togglePinIdea(id: String) {
+        ideas = ideas.map { if (it.id == id) it.copy(pinned = !it.pinned) else it }
+        saveIdeas()
+    }
+
+    fun removeIdea(id: String) {
+        ideas = ideas.filterNot { it.id == id }
+        saveIdeas()
+    }
+
+    fun clearIdeas() {
+        ideas = emptyList()
+        saveIdeas()
+    }
+
+    private fun saveIdeas() {
+        sp.edit().putString("ideas", XYJson.encodeToString(IDEA_LIST, ideas)).apply()
+    }
+
     /* ------------------------------ 存取 ------------------------------ */
 
     private fun readIds(key: String): Set<String> = runCatching {
@@ -146,6 +213,12 @@ class Local private constructor(ctx: Context) {
             ?: mutableMapOf()
     }.getOrDefault(mutableMapOf())
 
+    private fun readIdeas(): List<Idea> = runCatching {
+        sp.getString("ideas", null)
+            ?.let { XYJson.decodeFromString(IDEA_LIST, it) }
+            ?: emptyList()
+    }.getOrDefault(emptyList())
+
     companion object {
         private const val MAX_RECENT = 20
         private const val MAX_POS = 60
@@ -153,6 +226,7 @@ class Local private constructor(ctx: Context) {
         private val ID_LIST = ListSerializer(String.serializer())
         private val RECENT_LIST = ListSerializer(RecentLink.serializer())
         private val POS_MAP = MapSerializer(String.serializer(), String.serializer())
+        private val IDEA_LIST = ListSerializer(Idea.serializer())
 
         @Volatile
         private var inst: Local? = null

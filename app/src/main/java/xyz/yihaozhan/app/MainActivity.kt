@@ -71,6 +71,7 @@ import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.FeedScreen
 import xyz.yihaozhan.app.ui.HomeScreen
+import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.PickItem
@@ -145,6 +146,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     val visible = remember(prefs.tabOrder, prefs.tabHidden) { prefs.visibleTabs }
     var openPost by remember { mutableStateOf<Post?>(null) }
     var webUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    /* 灵感随记：原生整屏（不再拿 WebView 打开站点那页） */
+    var ideaOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
     var query by rememberSaveable { mutableStateOf("") }
@@ -204,6 +207,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         if (i >= 0) {
             openPost = null
             webUrl = null
+            ideaOpen = false
             if (!keepQuery) query = ""
             picker = PICK_NONE
             goPage(i)
@@ -235,7 +239,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
         containerColor = Color.Transparent,
         bottomBar = {
-            if (openPost == null && webUrl == null) {
+            if (openPost == null && webUrl == null && !ideaOpen) {
                 BottomDock(
                     position = dockPos,
                     current = curId,
@@ -265,6 +269,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
                 webUrl != null -> WebScreen(webUrl!!, { webUrl = null }, external, dark)
+                ideaOpen -> IdeaScreen(local) { ideaOpen = false }
                 openPost != null -> PostDetailScreen(
                     openPost!!, { openPost = null }, open, prefs.fontScale,
                     local = local, rememberPos = prefs.rememberPos
@@ -275,9 +280,25 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                         siteName = data.site.name.ifBlank { "壹号栈" },
                         dark = dark,
                         searchText = query,
+                        /* 自定义入口跟网页端同一份：站点后台「自定义链接」配几条这儿就有几颗 */
+                        links = data.links,
                         onHome = { goTab(0) },
-                        /* ✨ = 灵感随记：站点那个页面本来就只有网页版，交给 WebView 打开 */
-                        onIdea = { open(data.site.url.trimEnd('/') + "/#/idea") },
+                        onLink = { l ->
+                            /* 站内路由优先跳原生页，剩下的一律交给内置浏览器 */
+                            val path = l.url.substringAfter("#/", "").trimEnd('/')
+                            when {
+                                path.startsWith("idea") -> ideaOpen = true
+                                path.startsWith("nav") -> goTab(3)
+                                path.startsWith("share") -> goTab(1)
+                                path.startsWith("post") -> goTab(2)
+                                path.startsWith("home") -> goTab(0)
+                                else -> open(
+                                    if (l.url.startsWith("#")) {
+                                        data.site.url.trimEnd('/') + "/" + l.url
+                                    } else l.url
+                                )
+                            }
+                        },
                         onSaved = { goTab(5) },
                         onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
                         onOpenSearch = { searchOpen = true },
@@ -294,9 +315,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                             modifier = Modifier.fillMaxSize(),
                             /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
                             beyondBoundsPageCount = 1,
-                            key = { visible[it] }
+                            /* 底栏藏/换序之后 visible 会变短，而 pager 在换页数的那一帧
+                               仍可能拿旧下标来问 key —— 直接下标会 IndexOutOfBounds（就是
+                               「设置里关掉一个标签就闪退」那个崩溃）。getOrElse 兜住 */
+                            key = { i -> visible.getOrElse(i) { -1 } }
                         ) { page ->
-                            when (visible[page]) {
+                            when (visible.getOrElse(page) { -1 }) {
                                 0 -> HomeScreen(
                                     data = data,
                                     offline = ui.offline,

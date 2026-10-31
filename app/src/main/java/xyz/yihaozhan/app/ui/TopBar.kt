@@ -2,6 +2,7 @@ package xyz.yihaozhan.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DarkMode
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import xyz.yihaozhan.app.data.SiteLink
 
 /** 顶栏右侧那颗筛选胶囊的文案与动作（导航=分类，分享/文章=标签） */
 data class TopFilter(val emoji: String, val label: String, val onClick: () -> Unit)
@@ -54,8 +58,9 @@ fun TopBar(
     siteName: String,
     dark: Boolean,
     searchText: String,
+    links: List<SiteLink> = emptyList(),
     onHome: () -> Unit,
-    onIdea: () -> Unit,
+    onLink: (SiteLink) -> Unit = {},
     onSaved: () -> Unit,
     onTheme: () -> Unit,
     onOpenSearch: () -> Unit,
@@ -73,9 +78,11 @@ fun TopBar(
                 .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                /* 品牌：点一下回首页，跟站点 logo 一样 */
+                /* 品牌：点一下回首页，跟站点 logo 一样。
+                   最宽 150dp —— 站点名再长也不许把右边那排键挤没 */
                 Row(
                     Modifier
+                        .widthIn(max = 150.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -111,9 +118,22 @@ fun TopBar(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                TopAction(emoji = "✨") { onIdea() }
-                Spacer(Modifier.width(8.dp))
+                /* 自定义入口（站点后台「自定义链接」那几条）：占住中间剩下的宽度，
+                   条目多了就地横滑，右侧对齐贴着后面两颗固定键 —— 这样只有一条时
+                   也不会在中间飘着 */
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    links.forEach { l ->
+                        val ico = l.icon.ifBlank { l.name.take(1) }
+                        TopAction(emoji = ico) { onLink(l) }
+                    }
+                }
+                Spacer(Modifier.width(6.dp))
                 TopAction(icon = Icons.Rounded.Schedule) { onSaved() }
                 Spacer(Modifier.width(8.dp))
                 TopAction(icon = if (dark) Icons.Rounded.LightMode else Icons.Rounded.DarkMode) {

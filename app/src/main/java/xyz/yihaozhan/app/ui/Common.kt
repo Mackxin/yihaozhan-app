@@ -182,7 +182,10 @@ fun PageHeader(
     onSettings: (() -> Unit)? = null,
     leading: @Composable (() -> Unit)? = null,
     onTitleClick: (() -> Unit)? = null,
-    side: (@Composable () -> Unit)? = null
+    side: (@Composable () -> Unit)? = null,
+    /* 页头整块塞进 LazyColumn 当第一个 item 时，外面的列表已经留了 20dp，
+       这里再留就变 40 —— 那时候传 0.dp */
+    inset: androidx.compose.ui.unit.Dp = 20.dp
 ) {
     val pal = LocalXyPal.current
     Column(
@@ -235,7 +238,7 @@ fun PageHeader(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 14.dp)
+                    .padding(start = inset, end = inset, top = 14.dp)
             )
         }
         if (!meta.isNullOrBlank()) {
@@ -524,13 +527,16 @@ fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** 页头那排统计卡的容器：三张等宽、间距 10dp、左右跟正文一样留 20dp */
+/** 页头那排统计卡的容器：等宽、间距 10dp、左右跟正文一样留 20dp（塞进列表时传 0） */
 @Composable
-fun StatRow(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+fun StatRow(
+    inset: androidx.compose.ui.unit.Dp = 20.dp,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = inset),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         content = content
     )

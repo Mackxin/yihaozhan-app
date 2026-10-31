@@ -18,10 +18,24 @@ data class AppPayload(
     val stats: Stats = Stats(),
     val cats: List<Cat> = emptyList(),
     val feed: List<FeedItem> = emptyList(),
-    val posts: List<Post> = emptyList()
+    val posts: List<Post> = emptyList(),
+    /* 顶栏那几颗自定义入口（站点后台「自定义链接」，最多 5 条）。
+       老版本 app.json 没有这个字段 —— 默认空列表，顶栏就是「只有三颗固定键」的样子 */
+    val links: List<SiteLink> = emptyList()
 ) {
     val isEmpty: Boolean get() = feed.isEmpty() && posts.isEmpty() && cats.isEmpty()
 }
+
+/**
+ * 顶栏自定义入口。`url` 可能是站内路由（`#/idea` 这种原样保留），
+ * 也可能是完整网址 —— App 里站内路由尽量跳原生页，剩下的交给内置浏览器。
+ */
+@Serializable
+data class SiteLink(
+    val icon: String = "",
+    val name: String = "",
+    val url: String = ""
+)
 
 @Serializable
 data class Site(

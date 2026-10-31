@@ -106,45 +106,49 @@ fun FeedScreen(
     val listState = rememberLazyListState()
     LaunchedEffect(query, tag) { listState.scrollToItem(0) }
 
-    Column(Modifier.fillMaxSize()) {
+    /* 页头整块也放进列表里当第一个 item —— 一往下滑它就跟着走，
+       不再钉在顶上占掉半屏（原来 Column + LazyColumn 就是「置顶」的来源） */
+    val days = remember(all) { all.map { it.date }.filter { it.isNotBlank() }.toSet().size }
+    val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
         /* 页头照站点手机版：眉标 → 大标题 → 说明 → 三张统计卡 */
-        val days = remember(all) { all.map { it.date }.filter { it.isNotBlank() }.toSet().size }
-        val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
-        PageHeader(
-            "灵感分享",
-            "每天一小条，记录正在遇见的工具、灵感与小发现。像刷动态一样，回看这一年的数字足迹。",
-            eyebrow = "SHARING · 屿光",
-            side = {
-                StatRow {
-                    StatBox("${all.size}", "条分享", Modifier.weight(1f))
-                    StatBox("$days", "个记录日", Modifier.weight(1f))
-                    StatBox("$tagCount", "个标签", Modifier.weight(1f))
+        item(key = "head") {
+            PageHeader(
+                "灵感分享",
+                "每天一小条，记录正在遇见的工具、灵感与小发现。像刷动态一样，回看这一年的数字足迹。",
+                eyebrow = "SHARING · 屿光",
+                inset = 0.dp,
+                side = {
+                    StatRow(inset = 0.dp) {
+                        StatBox("${all.size}", "条分享", Modifier.weight(1f))
+                        StatBox("$days", "个记录日", Modifier.weight(1f))
+                        StatBox("$tagCount", "个标签", Modifier.weight(1f))
+                    }
                 }
-            }
-        )
+            )
+        }
         if (list.isEmpty()) {
-            EmptyState("🍃", "没找到", "换个词试试，或者把筛选清掉。")
+            item(key = "empty") { EmptyState("🍃", "没找到", "换个词试试，或者把筛选清掉。") }
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                groups.forEach { (date, items) ->
-                    item(key = "h-$date") {
-                        Text(
-                            prettyDate(date),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(items, key = { it.id + it.title }) { f ->
-                        /* 卡片上的标签也能筛：看到「AI」想找同类，不用滚回顶上去点那颗胶囊 */
-                        FeedCard(f, onOpen) { t -> onPickTag(if (tag == t) "" else t) }
-                    }
+            groups.forEach { (date, items) ->
+                item(key = "h-$date") {
+                    Text(
+                        prettyDate(date),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                    )
+                }
+                items(items, key = { it.id + it.title }) { f ->
+                    /* 卡片上的标签也能筛：看到「AI」想找同类，不用滚回顶上去点那颗胶囊 */
+                    FeedCard(f, onOpen) { t -> onPickTag(if (tag == t) "" else t) }
                 }
             }
         }
@@ -210,60 +214,65 @@ fun PostsScreen(
                     .lowercase().contains(query.trim().lowercase()))
         }
     }
-    Column(Modifier.fillMaxSize()) {
-        /* 统计跟站点一样是「篇数 / 字数 / 标签数」，字数按正文纯文字数算 */
-        val chars = remember(all) { all.sumOf { postChars(it.body) } }
-        val (charText, charUnit) = remember(chars) { fmtChars(chars) }
-        val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
-        PageHeader(
-            "文章",
-            "写得长一点的东西：随笔、折腾记录，以及那些值得慢慢想清楚的念头。",
-            eyebrow = "WRITING · 手记",
-            side = {
-                StatRow {
-                    StatBox("${all.size}", "篇文章", Modifier.weight(1f))
-                    StatBox(charText, charUnit, Modifier.weight(1f))
-                    StatBox("$tagCount", "个标签", Modifier.weight(1f))
+    /* 统计跟站点一样是「篇数 / 字数 / 标签数」，字数按正文纯文字数算 */
+    val chars = remember(all) { all.sumOf { postChars(it.body) } }
+    val (charText, charUnit) = remember(chars) { fmtChars(chars) }
+    val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
+
+    /* 页头是列表的第一项：往下滑就跟着走，不钉在顶上 */
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item(key = "head") {
+            PageHeader(
+                "文章",
+                "写得长一点的东西：随笔、折腾记录，以及那些值得慢慢想清楚的念头。",
+                eyebrow = "WRITING · 手记",
+                inset = 0.dp,
+                side = {
+                    StatRow(inset = 0.dp) {
+                        StatBox("${all.size}", "篇文章", Modifier.weight(1f))
+                        StatBox(charText, charUnit, Modifier.weight(1f))
+                        StatBox("$tagCount", "个标签", Modifier.weight(1f))
+                    }
+                }
+            )
+        }
+        if (posts.isEmpty()) {
+            item(key = "empty") {
+                if (all.isEmpty()) {
+                    EmptyState("✍️", "还没有文章", "站点后台「文章」页写一篇，这里就会出来。")
+                } else {
+                    EmptyState("🍃", "没找到", "换个词试试，或者把标签换回「全部标签」。")
                 }
             }
-        )
-        if (posts.isEmpty()) {
-            if (all.isEmpty()) {
-                EmptyState("✍️", "还没有文章", "站点后台「文章」页写一篇，这里就会出来。")
-            } else {
-                EmptyState("🍃", "没找到", "换个词试试，或者把标签换回「全部标签」。")
-            }
         } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(posts, key = { it.id }) { p ->
-                    CardBox(
-                        padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
-                        glass = false,
-                        onClick = { onOpen(p) }
+            items(posts, key = { it.id }) { p ->
+                CardBox(
+                    padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+                    glass = false,
+                    onClick = { onOpen(p) }
+                ) {
+                    Text(p.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
+                    if (p.excerpt.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            p.excerpt, fontSize = 13.5.sp, lineHeight = 22.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(p.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
-                        if (p.excerpt.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                p.excerpt, fontSize = 13.5.sp, lineHeight = 22.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                p.date, fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            p.tags.take(3).forEach { TagChip(it) }
-                        }
+                        Text(
+                            p.date, fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        p.tags.take(3).forEach { TagChip(it) }
                     }
                 }
             }
@@ -629,59 +638,58 @@ fun LinksScreen(
     val farDown = listState.firstVisibleItemIndex > 6
 
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
-        PageHeader(
-            "壹号栈导航",
-            "攒了多年的老书签全收在这一页 —— 共 **${data.stats.cats}** 类、**${data.stats.links}** 个坐标。" +
-                "顶部搜索框随时筛，最近打开过的会排在列表最前面。",
-            eyebrow = "NAVIGATION · 航图",
-            /* 点标题也能全部展开/折叠 —— 拇指够得着，比去右上角找按钮省事 */
-            onTitleClick = { if (!searching) toggleAll() },
-            /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
-            side = {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
-                    /* 搜索时是强制展开的，这个按钮就没意义了 */
-                    if (!searching) {
-                        HeadPill(if (allOpen) "全部折叠" else "全部展开") { toggleAll() }
+        /*
+         * 页头也是列表的一项 —— 往下滑整块跟着走，不再钉在顶上。
+         *
+         * 分类标题 + 该分类的链接（流式小标签），一节一节往下排；点标题折叠/展开。
+         * 一节 = 两个懒加载条目（标题、内容），所以五十个分类也只有百来个 item；
+         * 每节里面的标签是一次排完的 —— 多的分类上百个，少的几个，量级扛得住。
+         */
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 24.dp)
+        ) {
+            item(key = "head") {
+                PageHeader(
+                    "壹号栈导航",
+                    "攒了多年的老书签全收在这一页 —— 共 **${data.stats.cats}** 类、**${data.stats.links}** 个坐标。" +
+                        "顶部搜索框随时筛，最近打开过的会排在列表最前面。",
+                    eyebrow = "NAVIGATION · 航图",
+                    inset = 0.dp,
+                    /* 点标题也能全部展开/折叠 —— 拇指够得着，比去右上角找按钮省事 */
+                    onTitleClick = { if (!searching) toggleAll() },
+                    /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
+                    side = {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
+                            /* 搜索时是强制展开的，这个按钮就没意义了 */
+                            if (!searching) {
+                                HeadPill(if (allOpen) "全部折叠" else "全部展开") { toggleAll() }
+                            }
+                        }
                     }
-                }
-            }
-        )
-        /* 搜索时才需要「找到几个」；不搜索时头上那行「共 N 个站点 · M 个分类」已经说清楚了 */
-        if (searching) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "找到 ${groups.sumOf { it.second.size }} 个",
-                    fontSize = 11.5.sp, color = pal.mute
                 )
             }
-        }
-        if (groups.isEmpty()) {
-            EmptyState("🔍", "没找到", "换个关键词试试。")
-        } else {
-            /*
-             * 分类标题 + 该分类的链接（流式小标签），一节一节往下排；点标题折叠/展开。
-             * 一节 = 两个懒加载条目（标题、内容），所以五十个分类也只有百来个 item；
-             * 每节里面的标签是一次排完的 —— 多的分类上百个，少的几个，量级扛得住。
-             */
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 24.dp)
-            ) {
-                /* 最近打开：搜索时不显示（那时候你要的是「找到什么」，
-                   不是「刚看了什么」） */
-                if (!searching && recents.isNotEmpty()) {
+            /* 搜索时才需要「找到几个」；不搜索时头上那行「共 N 个站点 · M 个分类」已经说清楚了 */
+            if (searching) {
+                item(key = "count") {
+                    Text(
+                        "找到 ${groups.sumOf { it.second.size }} 个",
+                        fontSize = 11.5.sp, color = pal.mute,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                    )
+                }
+            }
+            if (groups.isEmpty()) {
+                item(key = "empty") { EmptyState("🔍", "没找到", "换个关键词试试。") }
+            }
+            /* 最近打开：搜索时不显示（那时候你要的是「找到什么」，
+                   不是「刚看了什么」） */                if (!searching && recents.isNotEmpty()) {
                     item(key = "recent") {
                         Row(
                             Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
@@ -738,9 +746,7 @@ fun LinksScreen(
                     }
                     item(key = "S|" + cat.id) { Spacer(Modifier.height(12.dp)) }
                 }
-            }
         }
-    }
         /* 两千多个站点滑到深处，没这颗圆就回不去了 */
         if (farDown) {
             Box(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 22.dp)) {
@@ -900,36 +906,41 @@ fun SavedScreen(
     }
     val shown = if (tab == 0) favs else laters
 
-    Column(Modifier.fillMaxSize()) {
-        PageHeader(
-            "收藏",
-            "标了星的、留着待会儿看的，都在这台手机里。",
-            eyebrow = "SAVED · 收藏",
-            /* 原来是一条胶囊切换条，挪到页头跟站点的 `.head-toggle` 一个位置、一个样子 */
-            side = {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HeadPill("收藏 ${favs.size}", active = tab == 0) { tab = 0 }
-                    HeadPill("稍后读 ${laters.size}", active = tab == 1) { tab = 1 }
+    /* 页头也是列表的一项：往下滑跟着走，不占着顶上不放 */
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item(key = "head") {
+            PageHeader(
+                "收藏",
+                "标了星的、留着待会儿看的，都在这台手机里。",
+                eyebrow = "SAVED · 收藏",
+                inset = 0.dp,
+                /* 原来是一条胶囊切换条，挪到页头跟站点的 `.head-toggle` 一个位置、一个样子 */
+                side = {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HeadPill("收藏 ${favs.size}", active = tab == 0) { tab = 0 }
+                        HeadPill("稍后读 ${laters.size}", active = tab == 1) { tab = 1 }
+                    }
+                }
+            )
+        }
+        if (shown.isEmpty()) {
+            item(key = "empty") {
+                if (tab == 0) {
+                    EmptyState("⭐️", "还没收藏", "文章右上角那颗星点一下，就收到这儿。")
+                } else {
+                    EmptyState("🕐", "稍后读是空的", "文章右上角那颗时钟点一下，先记着待会儿看。")
                 }
             }
-        )
-        if (shown.isEmpty()) {
-            if (tab == 0) {
-                EmptyState("⭐️", "还没收藏", "文章右上角那颗星点一下，就收到这儿。")
-            } else {
-                EmptyState("🕐", "稍后读是空的", "文章右上角那颗时钟点一下，先记着待会儿看。")
-            }
         } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(shown, key = { it.id }) { p ->
+            items(shown, key = { it.id }) { p ->
                     CardBox(
                         padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
                         glass = false,
@@ -975,7 +986,6 @@ fun SavedScreen(
                         }
                     }
                 }
-            }
         }
     }
 }
