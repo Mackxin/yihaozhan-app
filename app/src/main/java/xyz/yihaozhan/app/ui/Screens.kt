@@ -3,7 +3,9 @@ package xyz.yihaozhan.app.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +113,7 @@ fun FeedScreen(
     val days = remember(all) { all.map { it.date }.filter { it.isNotBlank() }.toSet().size }
     val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -152,6 +155,8 @@ fun FeedScreen(
                 }
             }
         }
+    }
+        BackToTopFab(listState)
     }
 }
 
@@ -218,10 +223,13 @@ fun PostsScreen(
     val chars = remember(all) { all.sumOf { postChars(it.body) } }
     val (charText, charUnit) = remember(chars) { fmtChars(chars) }
     val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
+    val listState = rememberLazyListState()
 
     /* 页头是列表的第一项：往下滑就跟着走，不钉在顶上 */
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
-        Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -277,6 +285,8 @@ fun PostsScreen(
                 }
             }
         }
+    }
+        BackToTopFab(listState)
     }
 }
 
@@ -478,7 +488,7 @@ private fun BarIcon(
     }
 }
 
-/** 右下角那颗玻璃小圆 */
+/** 右下角那颗玻璃小圆（尺寸/配色跟统一的 BackToTopFab 一致，换页不掉档） */
 @Composable
 private fun RoundBtn(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -488,16 +498,18 @@ private fun RoundBtn(
     val pal = LocalXyPal.current
     Box(
         Modifier
-            .size(38.dp)
+            .size(42.dp)
             .clip(RoundedCornerShape(99.dp))
-            .background(pal.bgSoft)
+            .background(pal.glass)
+            .border(BorderStroke(1.dp, pal.glassHi), RoundedCornerShape(99.dp))
+            .enterPop(180)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, desc, tint = pal.dim, modifier = Modifier.size(18.dp))
+        Icon(icon, desc, tint = pal.dim, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -905,10 +917,13 @@ fun SavedScreen(
         posts.filter { it.id in local.later }.sortedByDescending { it.date }
     }
     val shown = if (tab == 0) favs else laters
+    val listState = rememberLazyListState()
 
     /* 页头也是列表的一项：往下滑跟着走，不占着顶上不放 */
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -987,5 +1002,7 @@ fun SavedScreen(
                     }
                 }
         }
+    }
+        BackToTopFab(listState)
     }
 }

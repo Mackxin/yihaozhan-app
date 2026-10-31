@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -90,6 +91,7 @@ import xyz.yihaozhan.app.ui.YiTheme
 import xyz.yihaozhan.app.ui.rememberOpener
 import xyz.yihaozhan.app.ui.enterFade
 import xyz.yihaozhan.app.ui.enterPop
+import xyz.yihaozhan.app.ui.enterRise
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -270,13 +272,13 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             when {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
-                webUrl != null -> Box(Modifier.fillMaxSize().enterFade()) {
+                webUrl != null -> Box(Modifier.fillMaxSize().enterRise()) {
                     WebScreen(webUrl!!, { webUrl = null }, external, dark)
                 }
-                ideaOpen -> Box(Modifier.fillMaxSize().enterFade()) {
+                ideaOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                     IdeaScreen(local) { ideaOpen = false }
                 }
-                openPost != null -> Box(Modifier.fillMaxSize().enterFade()) {
+                openPost != null -> Box(Modifier.fillMaxSize().enterRise()) {
                     PostDetailScreen(
                         openPost!!, { openPost = null }, open, prefs.fontScale,
                         local = local, rememberPos = prefs.rememberPos
@@ -310,7 +312,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                         onSaved = { goTab(5) },
                         onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
                         onOpenSearch = { searchOpen = true },
-                        filter = filter
+                        filter = filter,
+                        /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
+                        top = data.top
                     )
                     /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
                     PullRefresh(
@@ -329,7 +333,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                             key = { i -> visible.getOrElse(i) { -1 } }
                         ) { page ->
                             when (visible.getOrElse(page) { -1 }) {
-                                0 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                0 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     HomeScreen(
                                         data = data,
                                         offline = ui.offline,
@@ -338,27 +342,27 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                         onOpenPost = { openPost = it }
                                     )
                                 }
-                                1 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                1 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     FeedScreen(
                                         data, query, feedTag, open,
                                         onPickTag = { feedTag = it }
                                     )
                                 }
-                                2 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                2 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     PostsScreen(data, query, postTag) { openPost = it }
                                 }
-                                3 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                3 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     LinksScreen(
                                         data, query, navCat, open, prefs.navCollapsed, local
                                     )
                                 }
-                                5 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                5 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     SavedScreen(
                                         data.posts, local,
                                         onOpenPost = { openPost = it }
                                     )
                                 }
-                                else -> Box(Modifier.fillMaxSize().enterFade()) {
+                                else -> Box(Modifier.fillMaxSize().enterRise()) {
                                     SettingsScreen(prefs, vm, open, local)
                                 }
                             }
@@ -481,9 +485,15 @@ private fun BottomDock(
     onPick: (Int) -> Unit
 ) {
     val pal = LocalXyPal.current
-    val itemW = if (showIcons) 58.dp else 64.dp
     val gap = 1.dp
     val density = LocalDensity.current
+    /* 按屏宽和 tab 数自适应，别写死 64dp —— 一开到「收藏」变六项，固定宽度会超出屏幕、
+       最后一个被裁掉。留出左右各 12dp 外边距 + 药丸内边距 5dp*2，再减去项间距后平均分。 */
+    val screenW = LocalConfiguration.current.screenWidthDp.dp
+    val count = tabs.size.coerceAtLeast(1)
+    val maxItemW = if (showIcons) 58.dp else 64.dp
+    val avail = screenW - 24.dp - 10.dp - gap * (count - 1)
+    val itemW = (avail / count.toFloat()).coerceAtMost(maxItemW).coerceAtLeast(38.dp)
     /* 胶囊高度取整行的实测高度：图标开关会让行变高，写死数字迟早对不上 */
     var rowH by remember { mutableStateOf(0) }
 
@@ -491,7 +501,7 @@ private fun BottomDock(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(bottom = 10.dp, top = 6.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Box(

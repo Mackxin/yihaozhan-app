@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -60,11 +61,24 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /** 打开外部链接：站内页也走浏览器（站点是 SPA，原生没法直接渲染后台那种页面） */
@@ -155,6 +169,65 @@ fun Modifier.enterPop(durationMs: Int = 230): Modifier {
         val s = 0.96f + 0.04f * p.value
         scaleX = s
         scaleY = s
+    }
+}
+
+/**
+ * 页面切换用的「高级感」转场：淡入 + 从下方轻轻抬起 + 极轻的一点点放大。
+ * 比纯淡入更有层次，内容像是「落定」而不是「啪一下出现」。
+ */
+@Composable
+fun Modifier.enterRise(durationMs: Int = 340): Modifier {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { p.animateTo(1f, tween(durationMs, easing = FastOutSlowInEasing)) }
+    return this.graphicsLayer {
+        alpha = p.value
+        /* 未开始时向下偏移 22px，落定时归零；用 px 以免受 density 影响 */
+        translationY = (1f - p.value) * 22f
+        val s = 0.985f + 0.015f * p.value
+        scaleX = s
+        scaleY = s
+    }
+}
+
+/**
+ * 统一的「回到顶部」浮动圆钮：滚过 threshold 个条目才淡入，点一下平滑滚回顶端。
+ * 各列表页共用一份，位置/尺寸/退场动画都一致。
+ */
+@Composable
+fun BoxScope.BackToTopFab(
+    listState: LazyListState,
+    threshold: Int = 3,
+    bottom: Dp = 22.dp,
+    end: Dp = 14.dp
+) {
+    val pal = LocalXyPal.current
+    val scope = rememberCoroutineScope()
+    val visible by remember { derivedStateOf { listState.firstVisibleItemIndex > threshold } }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)) + scaleIn(tween(200), initialScale = 0.86f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.86f),
+        modifier = Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom)
+    ) {
+        Box(
+            Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                /* 玻璃底 + 一圈亮边：纯 bgSoft 跟页面底色几乎一样，滚到底会「看不见按钮」 */
+                .background(pal.glass)
+                .border(BorderStroke(1.dp, pal.glassHi), CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { scope.launch { listState.animateScrollToItem(0) } },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.VerticalAlignTop, "回到顶部",
+                tint = pal.dim, modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 

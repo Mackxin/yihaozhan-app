@@ -21,9 +21,31 @@ data class AppPayload(
     val posts: List<Post> = emptyList(),
     /* 顶栏那几颗自定义入口（站点后台「自定义链接」，最多 5 条）。
        老版本 app.json 没有这个字段 —— 默认空列表，顶栏就是「只有三颗固定键」的样子 */
-    val links: List<SiteLink> = emptyList()
+    val links: List<SiteLink> = emptyList(),
+    /* 顶栏各块显隐（站点后台「站点信息 → 顶栏显示」）。
+       老 app.json 没这个字段 → 用默认 TopCfg()，全开，跟以前一模一样 */
+    val top: TopCfg = TopCfg()
 ) {
     val isEmpty: Boolean get() = feed.isEmpty() && posts.isEmpty() && cats.isEmpty()
+}
+
+/**
+ * 顶栏六块的显隐开关。默认全 true —— 缺字段、老数据、后台没动过，
+ * 都是「以前那个样子的顶栏」。
+ */
+@Serializable
+data class TopCfg(
+    val brand: Boolean = true,
+    val links: Boolean = true,
+    val search: Boolean = true,
+    val filter: Boolean = true,
+    val saved: Boolean = true,
+    val theme: Boolean = true
+) {
+    /** 品牌行整条都没东西可画时（品牌、入口、稍后读、主题全关），这行直接不占高度 */
+    val brandRowVisible: Boolean get() = brand || links || saved || theme
+    /** 搜索行同理（搜索条 + 筛选胶囊都关了就不留空档） */
+    val searchRowVisible: Boolean get() = search || filter
 }
 
 /**

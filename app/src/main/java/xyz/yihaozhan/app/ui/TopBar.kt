@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.data.SiteLink
+import xyz.yihaozhan.app.data.TopCfg
 
 /** 顶栏右侧那颗筛选胶囊的文案与动作（导航=分类，分享/文章=标签） */
 data class TopFilter(val emoji: String, val label: String, val onClick: () -> Unit)
@@ -64,9 +65,17 @@ fun TopBar(
     onSaved: () -> Unit,
     onTheme: () -> Unit,
     onOpenSearch: () -> Unit,
-    filter: TopFilter? = null
+    filter: TopFilter? = null,
+    /* 后台「站点信息 → 顶栏显示」那六个开关；缺省全开 */
+    top: TopCfg = TopCfg()
 ) {
     val pal = LocalXyPal.current
+    /* 六块全关就整块不画 —— 留一个空玻璃壳当「装饰」比没有更怪。
+       留 8dp 顶隙，免得页面标题直接贴住状态栏 */
+    if (!top.brandRowVisible && !top.searchRowVisible) {
+        Spacer(Modifier.height(8.dp))
+        return
+    }
     /* 下留 14 而不是 10：站点是 header 之后 .app 还有 20px 上内边距，
        这里对不上就会觉得页头贴着顶栏 */
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 14.dp)) {
@@ -77,9 +86,11 @@ fun TopBar(
                 .background(pal.glass)
                 .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp)
         ) {
+            if (top.brandRowVisible) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 /* 品牌：点一下回首页，跟站点 logo 一样。
                    最宽 150dp —— 站点名再长也不许把右边那排键挤没 */
+                if (top.brand) {
                 Row(
                     Modifier
                         .widthIn(max = 150.dp)
@@ -118,32 +129,44 @@ fun TopBar(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                }
                 /* 自定义入口（站点后台「自定义链接」那几条）：占住中间剩下的宽度，
                    条目多了就地横滑，右侧对齐贴着后面两颗固定键 —— 这样只有一条时
-                   也不会在中间飘着 */
+                   也不会在中间飘着。
+                   左边没品牌时改左对齐：否则左边一大片空白、几颗键全挤在右边 */
+                val hugRight = top.brand
                 Row(
                     Modifier
                         .weight(1f)
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        6.dp, if (hugRight) Alignment.End else Alignment.Start
+                    ),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    links.forEach { l ->
+                    if (top.links) links.forEach { l ->
                         val ico = l.icon.ifBlank { l.name.take(1) }
                         TopAction(emoji = ico) { onLink(l) }
                     }
                 }
-                Spacer(Modifier.width(6.dp))
-                TopAction(icon = Icons.Rounded.Schedule) { onSaved() }
-                Spacer(Modifier.width(8.dp))
-                TopAction(icon = if (dark) Icons.Rounded.LightMode else Icons.Rounded.DarkMode) {
-                    onTheme()
+                if (top.saved) {
+                    Spacer(Modifier.width(6.dp))
+                    TopAction(icon = Icons.Rounded.Schedule) { onSaved() }
+                }
+                if (top.theme) {
+                    Spacer(Modifier.width(8.dp))
+                    TopAction(icon = if (dark) Icons.Rounded.LightMode else Icons.Rounded.DarkMode) {
+                        onTheme()
+                    }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            }
+            if (top.brandRowVisible && top.searchRowVisible) Spacer(Modifier.height(10.dp))
+            if (top.searchRowVisible) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SearchPill(searchText, Modifier.weight(1f), onOpenSearch)
-                if (filter != null) FilterPill(filter)
+                if (top.search) SearchPill(searchText, Modifier.weight(1f), onOpenSearch)
+                if (top.filter && filter != null) FilterPill(filter)
+            }
             }
         }
     }

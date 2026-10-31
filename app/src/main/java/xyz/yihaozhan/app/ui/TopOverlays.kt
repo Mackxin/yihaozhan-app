@@ -44,6 +44,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -480,7 +481,9 @@ fun PickerSheet(
                 /* 分类有五十来个，滚到边界时最后一行会被切一半 —— 底部压一层渐隐把切口糊掉，
                    滚到底（没有更多）就不压，免得最后一行看着发白 */
                 val more = scroll.maxValue - scroll.value > 0
-                Box(Modifier.heightIn(max = 420.dp)) {
+                /* 五十来个分类一股脑铺开，给足屏高就不必滚（原来固定 420dp 会截断、逼你滑） */
+                val maxSheetH = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
+                Box(Modifier.heightIn(max = maxSheetH)) {
                     Column(Modifier.verticalScroll(scroll)) {
                         FlowRow(
                             Modifier.fillMaxWidth(),
