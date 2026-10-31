@@ -85,7 +85,11 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Lo
     }
 
     Column(Modifier.fillMaxSize()) {
-        PageHeader("设置", "外观、阅读、底栏、更新都在这里。")
+        PageHeader(
+            "设置",
+            "外观、阅读、底栏、更新都在这里。",
+            eyebrow = "SETTINGS · 设置"
+        )
 
         LazyColumn(
             Modifier.fillMaxSize(),

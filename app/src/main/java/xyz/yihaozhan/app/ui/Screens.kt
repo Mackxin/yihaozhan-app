@@ -108,11 +108,21 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
     LaunchedEffect(q, tag) { listState.scrollToItem(0) }
 
     Column(Modifier.fillMaxSize()) {
+        /* 页头照站点手机版：眉标 → 大标题 → 说明 → 三张统计卡 */
+        val days = remember(all) { all.map { it.date }.filter { it.isNotBlank() }.toSet().size }
+        val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
         PageHeader(
-            "分享",
-            "每天一小条：遇到好用的工具、看过的想法，都记在这里。",
-            meta = "${data.stats.feed} 条",
-            onSettings = onSettings
+            "灵感分享",
+            "每天一小条，记录正在遇见的工具、灵感与小发现。像刷动态一样，回看这一年的数字足迹。",
+            eyebrow = "SHARING · 屿光",
+            onSettings = onSettings,
+            side = {
+                StatRow {
+                    StatBox("${all.size}", "条分享", Modifier.weight(1f))
+                    StatBox("$days", "个记录日", Modifier.weight(1f))
+                    StatBox("$tagCount", "个标签", Modifier.weight(1f))
+                }
+            }
         )
         SearchField(q, { q = it }, "搜标题、描述、标签", Modifier.padding(horizontal = 20.dp))
         if (tags.isNotEmpty()) {
@@ -203,11 +213,22 @@ private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit, onTag: (String) -> U
 fun PostsScreen(data: AppPayload, onOpen: (Post) -> Unit, onSettings: () -> Unit) {
     val posts = remember(data) { data.posts.sortedByDescending { it.date } }
     Column(Modifier.fillMaxSize()) {
+        /* 统计跟站点一样是「篇数 / 字数 / 标签数」，字数按正文纯文字数算 */
+        val chars = remember(posts) { posts.sumOf { postChars(it.body) } }
+        val (charText, charUnit) = remember(chars) { fmtChars(chars) }
+        val tagCount = remember(posts) { posts.flatMap { it.tags }.toSet().size }
         PageHeader(
             "文章",
-            "长一点的东西：建站过程、工具心得、读书笔记。",
-            meta = "${posts.size} 篇",
-            onSettings = onSettings
+            "写得长一点的东西：随笔、折腾记录，以及那些值得慢慢想清楚的念头。",
+            eyebrow = "WRITING · 手记",
+            onSettings = onSettings,
+            side = {
+                StatRow {
+                    StatBox("${posts.size}", "篇文章", Modifier.weight(1f))
+                    StatBox(charText, charUnit, Modifier.weight(1f))
+                    StatBox("$tagCount", "个标签", Modifier.weight(1f))
+                }
+            }
         )
         if (posts.isEmpty()) {
             EmptyState("✍️", "还没有文章", "站点后台「文章」页写一篇，这里就会出来。")
@@ -602,28 +623,41 @@ fun LinksScreen(
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         PageHeader(
-            "导航",
-            "随手翻的一堆站点，按分类收好。",
-            meta = "${data.stats.cats} 个分类 · ${data.stats.links} 个站点",
+            "壹号栈导航",
+            "攒了多年的老书签全收在这一页 —— 共 **${data.stats.cats}** 类、**${data.stats.links}** 个坐标。" +
+                "顶部搜索框随时筛，最近打开过的会排在列表最前面。",
+            eyebrow = "NAVIGATION · 航图",
             onSettings = onSettings,
             /* 点标题也能全部展开/折叠 —— 拇指够得着，比去右上角找按钮省事 */
-            onTitleClick = { if (!searching) toggleAll() }
+            onTitleClick = { if (!searching) toggleAll() },
+            /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
+            side = {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
+                    /* 搜索时是强制展开的，这个按钮就没意义了 */
+                    if (!searching) {
+                        HeadPill(if (allOpen) "全部折叠" else "全部展开") { toggleAll() }
+                    }
+                }
+            }
         )
         SearchField(q, { q = it }, "搜站点名、描述、网址", Modifier.padding(horizontal = 20.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                if (searching) "找到 ${groups.sumOf { it.second.size }} 个" else "${groups.size} 个分类",
-                fontSize = 11.5.sp, color = pal.mute
-            )
-            Spacer(Modifier.weight(1f))
-            /* 搜索时是强制展开的，这个按钮就没意义了 */
-            if (!searching) {
-                TinyBtn(if (allOpen) "全部折叠" else "全部展开", toggleAll)
+        /* 搜索时才需要「找到几个」；不搜索时头上那行「共 N 个站点 · M 个分类」已经说清楚了 */
+        if (searching) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "找到 ${groups.sumOf { it.second.size }} 个",
+                    fontSize = 11.5.sp, color = pal.mute
+                )
             }
         }
         if (groups.isEmpty()) {
@@ -865,16 +899,20 @@ fun SavedScreen(
         PageHeader(
             "收藏",
             "标了星的、留着待会儿看的，都在这台手机里。",
-            meta = "收藏 ${favs.size} · 稍后读 ${laters.size}",
-            onSettings = onSettings
+            eyebrow = "SAVED · 收藏",
+            onSettings = onSettings,
+            /* 原来是一条胶囊切换条，挪到页头跟站点的 `.head-toggle` 一个位置、一个样子 */
+            side = {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HeadPill("收藏 ${favs.size}", active = tab == 0) { tab = 0 }
+                    HeadPill("稍后读 ${laters.size}", active = tab == 1) { tab = 1 }
+                }
+            }
         )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TagChip("收藏 ${favs.size}", { tab = 0 }, active = tab == 0)
-            TagChip("稍后读 ${laters.size}", { tab = 1 }, active = tab == 1)
-        }
         if (shown.isEmpty()) {
             if (tab == 0) {
                 EmptyState("⭐️", "还没收藏", "文章右上角那颗星点一下，就收到这儿。")
