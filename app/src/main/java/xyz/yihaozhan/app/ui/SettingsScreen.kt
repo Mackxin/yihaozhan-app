@@ -561,6 +561,15 @@ private fun TabOrderEditor(prefs: Prefs) {
                     color = if (id in prefs.hiddenSet) pal.mute else pal.text,
                     modifier = Modifier.weight(1f)
                 )
+                if (!prefs.canHide(id)) {
+                    /* 「设置」是回后台的唯一入口，藏了就再也改不回来 —— 干脆标成常驻 */
+                    Text(
+                        if (id == Prefs.SETTINGS_TAB) "常驻" else "至少留一个",
+                        fontSize = 10.5.sp,
+                        color = pal.mute,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
                 Switch(
                     checked = id !in prefs.hiddenSet,
                     enabled = prefs.canHide(id),
@@ -569,7 +578,7 @@ private fun TabOrderEditor(prefs: Prefs) {
             }
         }
         Text(
-            "长按一行拖动换位置；开关决定它露不露脸，至少留一个",
+            "长按一行拖动换位置；开关决定它露不露脸。「设置」常驻（藏了就再也进不来），其余至少留一个",
             fontSize = 11.sp,
             color = pal.mute,
             modifier = Modifier.padding(top = 4.dp, start = 8.dp)

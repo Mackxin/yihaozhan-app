@@ -243,10 +243,10 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 手势走 `nestedScroll` + 指针拖动两条路：列表自己还能滚时轮不到这里，从页头或空白处拉也能拉
 （分享/文章/导航的页头是钉在列表外面的，光靠 `nestedScroll` 在这几页拉不动）。
 
-**入场动效**：换页（点底栏 / 滑页 / 打开文章、灵感、网页）时整块内容**淡入**，不再一下子硬切；
-搜索层、底部筛选面板这些**弹层**淡入的同时轻微放大（0.96→1）「浮起来」。两个都是
-`Common.kt` 里的 `Modifier.enterFade()` / `Modifier.enterPop()`（`@Composable` + `Animatable` + `graphicsLayer`），
-220~300ms、`FastOutSlowInEasing`，节奏照 Material3 的来。
+**入场动效**：换页（点底栏 / 滑页 / 打开文章、灵感、网页）时整块内容**淡入 + 从下方轻轻抬起**，
+不再一下子硬切；搜索层、底部筛选面板这些**弹层**淡入的同时轻微放大（0.96→1）「浮起来」。
+两者都在 `Common.kt` 里：`Modifier.enterRise()`（340ms）/ `Modifier.enterPop()`（230ms），
+`@Composable` + `Animatable` + `graphicsLayer`，缓动 `FastOutSlowInEasing`，节奏照 Material3 的来。
 
 ### 设置里能改什么
 
@@ -257,7 +257,7 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 | 阅读 | 记住读到哪里 | 默认开；每篇各记各的，关掉就每次都从开头 |
 | 导航 | 打开时全折叠 | 默认关；打开导航页时所有分类先收起来，自己点开想看的那几节 |
 | 底部标签栏 | 显示图标 | **默认关**：只留文字时药丸矮一截，更不抢内容 |
-| 底部标签栏 | 排序与显示 | **长按一行往上/下拖**就能换位置（`detectDragGesturesAfterLongPress` + `offset`，越半行就交换并回补位移），右侧开关决定显示或隐藏；**至少留一个**，最后一个的开关会锁住 |
+| 底部标签栏 | 排序与显示 | **长按一行往上/下拖**就能换位置（`detectDragGesturesAfterLongPress` + `offset`，越半行就交换并回补位移），右侧开关决定显示或隐藏；**「设置」是常驻项**（灰掉 + 标「常驻」），其余**至少留一个**，最后一个的开关会锁住 |
 | 启动 | 打开 App 停在 | 六个页面里选一个，下次打开生效 |
 | 内容更新 | 打开时自动拉最新 | 关掉后只在手动点「立即同步」时联网 |
 | App 更新 | 启动时检查新版 | 关掉后不会每次打开都问，只能在设置里手动查 |
@@ -269,6 +269,14 @@ git add api/app.json && git commit -m "更新 App 数据" && git push
 
 顶部所有页面的标题、说明、小字都是**居中**的；页头右上角的齿轮已经撤了 ——
 进设置改走底栏第五个页签，回首页点顶栏左上那颗「栈」。
+
+**「设置」藏不掉，藏掉的页点了会自动放回来**：设置是唯一能把这些开关改回去的地方，
+一旦藏了就只剩重装一条路，所以它在「排序与显示」里是常驻项（开关灰掉、右侧标「常驻」），
+`Prefs.setTabHidden` 里还有一道兜底；老版本留下的 «设置被隐藏» 配置会在启动时自动修好。
+其余页被藏起来时，任何指向它的入口（顶栏 🕐 稍后读 → 收藏、首页「逛逛导航」→ 导航、
+自定义入口 → 分享/文章）都不会「点了没反应」：会把它放回底栏、弹一句
+「已把「收藏」放回底栏」，然后翻过去（`jump()` 里先 `setTabHidden(id,false)`，
+等重组把 pager 页数改好，再由 `LaunchedEffect(pendingTab, visible)` 执行翻页）。
 
 **键盘不再赖着不走**：只要页面上有输入框调起了输入法，换页（`LaunchedEffect(curId)`）、
 点窗口里的空白处（根 `Box` 上挂 `detectTapGestures`）、或者输入框自己失焦（`onFocusChanged`）

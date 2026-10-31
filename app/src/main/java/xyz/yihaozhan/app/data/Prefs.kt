@@ -160,6 +160,9 @@ class Prefs private constructor(ctx: Context) {
 
     /** 显示 / 隐藏某个 tab。只剩一个时不许再隐藏，否则底栏就空了 */
     fun setTabHidden(id: Int, hidden: Boolean) {
+        /* 「设置」永远不许藏：它是唯一能把这些开关改回来的地方，
+           一旦藏了，除了重装没有第二条路（v2.4 修的就是这个死胡同） */
+        if (hidden && id == SETTINGS_TAB) return
         val set = hiddenSet.toMutableSet()
         if (hidden) {
             if (visibleTabs.size <= 1) return
@@ -171,8 +174,18 @@ class Prefs private constructor(ctx: Context) {
         sp.edit().putString("tabHidden", tabHidden).apply()
     }
 
-    /** 当前能不能隐藏它（设置页禁用开关用） */
-    fun canHide(id: Int): Boolean = id in hiddenSet || visibleTabs.size > 1
+    /** 当前能不能隐藏它（设置页禁用开关用）。设置永远是常驻项 */
+    fun canHide(id: Int): Boolean =
+        id != SETTINGS_TAB && (id in hiddenSet || visibleTabs.size > 1)
+
+    init {
+        /* v2.3 及以前允许把「设置」也藏起来 —— 藏完就再也进不去设置。
+           这里一次性把 4 从隐藏集合里摘掉，老配置自动修好，不用重装。 */
+        if (SETTINGS_TAB in hiddenSet) {
+            tabHidden = (hiddenSet - SETTINGS_TAB).joinToString(",")
+            sp.edit().putString("tabHidden", tabHidden).apply()
+        }
+    }
 
     /** 字号档位换算成倍率，交给 Markdown 渲染用 */
     val fontScale: Float
@@ -193,6 +206,9 @@ class Prefs private constructor(ctx: Context) {
     companion object {
         /** 最大 tab 下标。加新页签时只改这里 + MainActivity 的 TABS */
         const val LAST_TAB = 5
+
+        /** 「设置」页签的下标 —— 常驻，不许隐藏 */
+        const val SETTINGS_TAB = 4
 
         private const val DEFAULT_ORDER = "0,1,2,3,4,5"
 

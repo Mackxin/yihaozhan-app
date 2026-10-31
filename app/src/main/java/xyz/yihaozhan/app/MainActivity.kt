@@ -1,6 +1,7 @@
 package xyz.yihaozhan.app
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -206,14 +207,34 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
 
     /* keepQuery：从搜索结果「看全部 N 个」跳过去时要留着关键词（那一页正好用它筛），
        而直接点底栏就是重新开始，关键词清掉。 */
+    /* 目标页被藏在设置里时不能「点了毫无反应」（顶栏那颗 🕐 稍后读最容易撞上）：
+       先把它放回底栏，等重组把页数改好，再由下面那个 effect 翻过去 */
+    var pendingTab by remember { mutableStateOf<Int?>(null) }
     val jump: (Int, Boolean) -> Unit = { id, keepQuery ->
+        openPost = null
+        webUrl = null
+        ideaOpen = false
+        if (!keepQuery) query = ""
+        picker = PICK_NONE
         val i = visible.indexOf(id)
         if (i >= 0) {
-            openPost = null
-            webUrl = null
-            ideaOpen = false
-            if (!keepQuery) query = ""
-            picker = PICK_NONE
+            goPage(i)
+        } else {
+            prefs.setTabHidden(id, false)
+            pendingTab = id
+            Toast.makeText(
+                context, "已把「" + tabLabel(id) + "」放回底栏", Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /* 底栏放回来之后再翻页：pager 的页数读的是 visible，
+       直接 scrollToPage 一个新区间外的下标会被夹回原位 */
+    LaunchedEffect(pendingTab, visible) {
+        val id = pendingTab ?: return@LaunchedEffect
+        val i = visible.indexOf(id)
+        if (i >= 0) {
+            pendingTab = null
             goPage(i)
         }
     }
