@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -57,6 +60,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import java.util.Locale
 
 /** 打开外部链接：站内页也走浏览器（站点是 SPA，原生没法直接渲染后台那种页面） */
@@ -96,6 +104,57 @@ fun openUrl(ctx: Context, url: String) {
         })
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(ctx, "没有能打开这个链接的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * 经 FileProvider 把本地文件递给系统分享面板（图片 / JSON / .md 都走这个）。
+ * 跟更新安装包共用同一个 provider（authority = 包名 + ".fileprovider"），
+ * file_paths.xml 已经把整个 cache 目录放开，所以临时文件放 cache 下就能拿到 uri。
+ */
+fun shareFile(ctx: Context, file: File, mime: String, title: String = "分享到") {
+    try {
+        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        ctx.startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "分享失败：${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** 写一段文本到 cache 目录，返回文件（失败返回 null） */
+fun writeCacheText(ctx: Context, name: String, text: String): File? = runCatching {
+    val f = File(ctx.cacheDir, name)
+    f.writeText(text)
+    f
+}.getOrNull()
+
+/* ------------------------------ 入场动效 ------------------------------
+ * 所有「突然冒出来」的地方都套一个，让它轻轻淡入（弹出还会带一点放大），
+ * 不要一下子硬切。时长 220~300ms，easeOut，参考 Material3 的动效节奏。 */
+
+/** 整块内容首次出现时淡入（alpha 0→1） */
+@Composable
+fun Modifier.enterFade(durationMs: Int = 280): Modifier {
+    val a = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { a.animateTo(1f, tween(durationMs, easing = FastOutSlowInEasing)) }
+    return this.graphicsLayer { alpha = a.value }
+}
+
+/** 对话框 / 面板首次出现时淡入 + 轻微放大（0.96→1），像轻轻浮起来 */
+@Composable
+fun Modifier.enterPop(durationMs: Int = 230): Modifier {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { p.animateTo(1f, tween(durationMs, easing = FastOutSlowInEasing)) }
+    return this.graphicsLayer {
+        alpha = p.value
+        val s = 0.96f + 0.04f * p.value
+        scaleX = s
+        scaleY = s
     }
 }
 
@@ -443,6 +502,8 @@ fun CardBox(
     /* 列表条目默认透明：站点 .feed-card 就是 background:none，
        靠留白分组。也给里面的标签胶囊留出能看清的底。 */
     glass: Boolean = true,
+    /* 临时的高亮色（比如随机回顾时那张卡闪一下），不给就用默认玻璃底 */
+    tint: Color? = null,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -451,7 +512,7 @@ fun CardBox(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(XyR.lg.dp))
-            .background(if (glass) pal.glass else Color.Transparent)
+            .background(tint ?: if (glass) pal.glass else Color.Transparent)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(padding)
     ) { content() }

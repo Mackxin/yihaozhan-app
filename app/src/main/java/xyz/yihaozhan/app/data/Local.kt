@@ -9,6 +9,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.regex.Pattern
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** 导航里点开过的一个站点：只留名字和网址，够拼一颗小标签 */
 @Serializable
@@ -184,6 +191,93 @@ class Local private constructor(ctx: Context) {
         saveIdeas()
     }
 
+    /* 草稿：跟站点一样，打了一半切走也不丢（站点存 localStorage，这里存 SP） */
+    var ideaDraft: String
+        get() = sp.getString("ideaDraft", "") ?: ""
+        set(v) {
+            if (v == ideaDraft) return
+            sp.edit().putString("ideaDraft", v).apply()
+        }
+
+    /** 标签改名：直接改写每条正文里的 `#旧` → `#新`（标签本就是从正文现抠的） */
+    fun renameIdeaTag(old: String, newName: String) {
+        if (old.isBlank() || newName.isBlank()) return
+        val re = Regex("(?<!\\S)#" + Pattern.quote(old) + "(?=[\\s#]|$)")
+        var changed = false
+        ideas = ideas.map {
+            if (re.containsMatchIn(it.text)) {
+                changed = true
+                it.copy(text = re.replace(it.text, "#$newName"))
+            } else it
+        }
+        if (changed) saveIdeas()
+    }
+
+    /** 标签删除：把每条正文里的 `#旧` 抹掉 */
+    fun deleteIdeaTag(old: String) {
+        if (old.isBlank()) return
+        val re = Regex("(?<!\\S)#" + Pattern.quote(old) + "(?=[\\s#]|$)")
+        var changed = false
+        ideas = ideas.map {
+            if (re.containsMatchIn(it.text)) {
+                changed = true
+                it.copy(text = re.replace(it.text, ""))
+            } else it
+        }
+        if (changed) saveIdeas()
+    }
+
+    /** 导出成 JSON（跟站点电脑版同一个形状，两边能互相导入） */
+    fun exportIdeasJson(): String {
+        val arr = ideas.map { it ->
+            val tags = ideaTagsOf(it.text)
+            val inner = buildString {
+                append("\"text\":\""); append(escapeJson(it.text)); append('"')
+                append(",\"tags\":["); append(tags.joinToString { "\"${escapeJson(it)}\"" }); append(']')
+                append(",\"ts\":${it.ts}")
+                append(",\"date\":\""); append(fmtStamp(it.ts)); append('"')
+                append(",\"pinned\":${it.pinned}")
+            }
+            "{$inner}"
+        }
+        return "[\n  " + arr.joinToString(",\n  ") + "\n]"
+    }
+
+    /** 导出成 Markdown：按时间分小标题，能直接贴进任何笔记软件 */
+    fun exportIdeasMd(): String {
+        val sb = StringBuilder()
+        sb.append("# 灵感随记\n\n> 导出于 ").append(dateNow()).append("，共 ").append(ideas.size).append(" 条。\n\n")
+        ideas.forEach {
+            sb.append("## ").append(fmtStamp(it.ts)).append(if (it.pinned) " · 📌" else "").append('\n')
+            val tags = ideaTagsOf(it.text)
+            if (tags.isNotEmpty()) sb.append("\n_").append(tags.joinToString(" ") { "#$it" }).append("_\n")
+            sb.append('\n').append(it.text.trim()).append("\n\n")
+        }
+        return sb.toString()
+    }
+
+    /** 从 JSON 合并导入：去重（按 trim 后的正文），返回新增条数；解析失败返回 -1 */
+    fun importIdeasJson(text: String): Int {
+        val arr = runCatching { JSONArray(text) }.getOrNull() ?: return -1
+        val seen = ideas.map { it.text.trim() }.toMutableSet()
+        val out = ideas.toMutableList()
+        var added = 0
+        for (i in 0 until arr.length()) {
+            val o = runCatching { arr.getJSONObject(i) }.getOrNull() ?: continue
+            val t = (o.optString("text").ifBlank { o.optString("content") }).trim()
+            if (t.isEmpty() || t in seen) continue
+            seen.add(t)
+            val ts = o.optLong("ts", 0L).let { if (it == 0L) parseDate(o.optString("date")) else it }
+            out.add(Idea(id = "i-" + System.currentTimeMillis().toString(36) + added, text = t, ts = ts))
+            added++
+        }
+        if (added > 0) {
+            ideas = out.sortedByDescending { it.ts }
+            saveIdeas()
+        }
+        return added
+    }
+
     private fun saveIdeas() {
         sp.edit().putString("ideas", XYJson.encodeToString(IDEA_LIST, ideas)).apply()
     }
@@ -218,6 +312,44 @@ class Local private constructor(ctx: Context) {
             ?.let { XYJson.decodeFromString(IDEA_LIST, it) }
             ?: emptyList()
     }.getOrDefault(emptyList())
+
+    /* ------------------------------ 导出/导入的小工具 ------------------------------ */
+
+    /** 正文里的 `#标签`：井号开头、接下来是中文/字母/数字/下划线，遇到其它字符就断 */
+    private fun ideaTagsOf(text: String): List<String> {
+        val re = Regex("#[\\u4e00-\\u9fa5A-Za-z0-9_]+")
+        return re.findAll(text).map { it.value.drop(1) }.distinct().toList()
+    }
+
+    private fun escapeJson(s: String): String =
+        s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+    private fun fmtStamp(ts: Long): String {
+        if (ts <= 0L) return ""
+        val d = Date(ts)
+        val now = Calendar.getInstance()
+        val cal = Calendar.getInstance().apply { time = d }
+        val sameYear = cal.get(Calendar.YEAR) == now.get(Calendar.YEAR)
+        val hm = p2(cal.get(Calendar.HOUR_OF_DAY)) + ":" + p2(cal.get(Calendar.MINUTE))
+        return if (sameYear) "${cal.get(Calendar.MONTH) + 1}月${cal.get(Calendar.DATE)}日 $hm"
+        else "${cal.get(Calendar.YEAR)}年${cal.get(Calendar.MONTH) + 1}月${cal.get(Calendar.DATE)}日"
+    }
+
+    private fun dateNow(): String {
+        val d = Calendar.getInstance()
+        return "${d.get(Calendar.YEAR)}/${p2(d.get(Calendar.MONTH) + 1)}/${p2(d.get(Calendar.DATE))} " +
+                "${p2(d.get(Calendar.HOUR_OF_DAY))}:${p2(d.get(Calendar.MINUTE))}"
+    }
+
+    private fun parseDate(s: String): Long {
+        if (s.isBlank()) return System.currentTimeMillis()
+        for (f in arrayOf("yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd", "yyyy/MM/dd HH:mm")) {
+            runCatching { SimpleDateFormat(f, Locale.CHINA).parse(s)?.time }.getOrNull()?.let { return it }
+        }
+        return System.currentTimeMillis()
+    }
+
+    private fun p2(n: Int) = if (n < 10) "0$n" else "$n"
 
     companion object {
         private const val MAX_RECENT = 20

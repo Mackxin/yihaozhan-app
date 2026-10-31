@@ -112,7 +112,7 @@ fun SearchOverlay(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(Modifier.fillMaxSize().background(pal.bg)) {
+        Box(Modifier.fillMaxSize().background(pal.bg).enterFade()) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 Row(
                     Modifier
@@ -454,6 +454,7 @@ fun PickerSheet(
                     .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
                     .background(pal.bgSoft)
                     .navigationBarsPadding()
+                    .enterPop()
                     .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 18.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

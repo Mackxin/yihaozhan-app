@@ -84,18 +84,20 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Lo
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        PageHeader(
-            "设置",
-            "外观、阅读、底栏、更新都在这里。",
-            eyebrow = "SETTINGS · 设置"
-        )
-
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+    /* 页头整块当列表第一个 item，往下滑跟着走，不钉在顶上（跟分享/文章/导航一致） */
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item("head") {
+            PageHeader(
+                "设置",
+                "外观、阅读、底栏、更新都在这里。",
+                eyebrow = "SETTINGS · 设置",
+                inset = 0.dp
+            )
+        }
             /* ---------------- 外观 ---------------- */
             item { GroupTitle("外观") }
             item {
@@ -394,7 +396,6 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Lo
                 }
             }
         }
-    }
 }
 
 /* ------------------------------ 零件 ------------------------------ */

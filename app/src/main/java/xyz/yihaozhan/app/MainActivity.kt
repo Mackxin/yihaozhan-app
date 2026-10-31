@@ -88,6 +88,8 @@ import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
 import xyz.yihaozhan.app.ui.YiTheme
 import xyz.yihaozhan.app.ui.rememberOpener
+import xyz.yihaozhan.app.ui.enterFade
+import xyz.yihaozhan.app.ui.enterPop
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -268,12 +270,18 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             when {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
-                webUrl != null -> WebScreen(webUrl!!, { webUrl = null }, external, dark)
-                ideaOpen -> IdeaScreen(local) { ideaOpen = false }
-                openPost != null -> PostDetailScreen(
-                    openPost!!, { openPost = null }, open, prefs.fontScale,
-                    local = local, rememberPos = prefs.rememberPos
-                )
+                webUrl != null -> Box(Modifier.fillMaxSize().enterFade()) {
+                    WebScreen(webUrl!!, { webUrl = null }, external, dark)
+                }
+                ideaOpen -> Box(Modifier.fillMaxSize().enterFade()) {
+                    IdeaScreen(local) { ideaOpen = false }
+                }
+                openPost != null -> Box(Modifier.fillMaxSize().enterFade()) {
+                    PostDetailScreen(
+                        openPost!!, { openPost = null }, open, prefs.fontScale,
+                        local = local, rememberPos = prefs.rememberPos
+                    )
+                }
                 else -> Column(Modifier.fillMaxSize()) {
                     /* 顶栏在所有页签之上，翻页它不动 —— 跟站点那个 sticky header 一样 */
                     TopBar(
@@ -321,26 +329,38 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                             key = { i -> visible.getOrElse(i) { -1 } }
                         ) { page ->
                             when (visible.getOrElse(page) { -1 }) {
-                                0 -> HomeScreen(
-                                    data = data,
-                                    offline = ui.offline,
-                                    onOpen = open,
-                                    onGoTab = goTab,
-                                    onOpenPost = { openPost = it }
-                                )
-                                1 -> FeedScreen(
-                                    data, query, feedTag, open,
-                                    onPickTag = { feedTag = it }
-                                )
-                                2 -> PostsScreen(data, query, postTag) { openPost = it }
-                                3 -> LinksScreen(
-                                    data, query, navCat, open, prefs.navCollapsed, local
-                                )
-                                5 -> SavedScreen(
-                                    data.posts, local,
-                                    onOpenPost = { openPost = it }
-                                )
-                                else -> SettingsScreen(prefs, vm, open, local)
+                                0 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    HomeScreen(
+                                        data = data,
+                                        offline = ui.offline,
+                                        onOpen = open,
+                                        onGoTab = goTab,
+                                        onOpenPost = { openPost = it }
+                                    )
+                                }
+                                1 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    FeedScreen(
+                                        data, query, feedTag, open,
+                                        onPickTag = { feedTag = it }
+                                    )
+                                }
+                                2 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    PostsScreen(data, query, postTag) { openPost = it }
+                                }
+                                3 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    LinksScreen(
+                                        data, query, navCat, open, prefs.navCollapsed, local
+                                    )
+                                }
+                                5 -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    SavedScreen(
+                                        data.posts, local,
+                                        onOpenPost = { openPost = it }
+                                    )
+                                }
+                                else -> Box(Modifier.fillMaxSize().enterFade()) {
+                                    SettingsScreen(prefs, vm, open, local)
+                                }
                             }
                         }
                     }
