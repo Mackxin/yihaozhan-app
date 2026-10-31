@@ -49,7 +49,6 @@ import xyz.yihaozhan.app.data.Post
 fun HomeScreen(
     data: AppPayload,
     offline: Boolean,
-    onSettings: () -> Unit,
     onOpen: (String) -> Unit,
     onGoTab: (Int) -> Unit,
     onOpenPost: (Post) -> Unit
@@ -61,7 +60,7 @@ fun HomeScreen(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
-        item { Hero(data, onSettings, offline) }
+        item { Hero(data, offline) }
 
         item {
             Row(
@@ -125,7 +124,7 @@ fun HomeScreen(
 /* ------------------------------ 门面 ------------------------------ */
 
 @Composable
-private fun Hero(data: AppPayload, onSettings: () -> Unit, offline: Boolean) {
+private fun Hero(data: AppPayload, offline: Boolean) {
     val pal = LocalXyPal.current
     Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Column(
@@ -189,7 +188,6 @@ private fun Hero(data: AppPayload, onSettings: () -> Unit, offline: Boolean) {
                 StatBox("${data.stats.links}", "个站点", Modifier.weight(1f))
             }
         }
-        Box(Modifier.align(Alignment.TopEnd).padding(end = 6.dp)) { GearButton(onSettings) }
     }
 }
 

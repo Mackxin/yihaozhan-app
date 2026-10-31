@@ -73,8 +73,13 @@ import xyz.yihaozhan.app.ui.FeedScreen
 import xyz.yihaozhan.app.ui.HomeScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
+import xyz.yihaozhan.app.ui.PickItem
+import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
 import xyz.yihaozhan.app.ui.PullRefresh
+import xyz.yihaozhan.app.ui.SearchOverlay
+import xyz.yihaozhan.app.ui.TopBar
+import xyz.yihaozhan.app.ui.TopFilter
 import xyz.yihaozhan.app.ui.UpdateDialog
 import xyz.yihaozhan.app.ui.PostsScreen
 import xyz.yihaozhan.app.ui.SavedScreen
@@ -121,6 +126,12 @@ private val TABS = listOf(
 
 fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
 
+/* 底部那个筛选面板打开的是哪一份清单 */
+private const val PICK_NONE = 0
+private const val PICK_CAT = 1
+private const val PICK_FEED_TAG = 2
+private const val PICK_POST_TAG = 3
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
@@ -128,11 +139,20 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     /* 收藏 / 稍后读 / 最近打开 / 读到哪：本机数据，一份单例 */
     val local = remember { Local.of(context) }
     val ui = vm.ui
+    val data = ui.data
     /* 只在设置里改过顺序/显隐时才重算：visibleTabs 是 getter，
        不 remember 的话每次重组都新造一个 List，底栏和无障碍树跟着白刷一遍。 */
     val visible = remember(prefs.tabOrder, prefs.tabHidden) { prefs.visibleTabs }
     var openPost by remember { mutableStateOf<Post?>(null) }
     var webUrl by rememberSaveable { mutableStateOf<String?>(null) }
+
+    /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
+    var query by rememberSaveable { mutableStateOf("") }
+    var feedTag by rememberSaveable { mutableStateOf("") }
+    var postTag by rememberSaveable { mutableStateOf("") }
+    var navCat by rememberSaveable { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    var picker by remember { mutableStateOf(PICK_NONE) }
 
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -177,14 +197,20 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         }
     }
 
-    val goTab: (Int) -> Unit = { id ->
+    /* keepQuery：从搜索结果「看全部 N 个」跳过去时要留着关键词（那一页正好用它筛），
+       而直接点底栏就是重新开始，关键词清掉。 */
+    val jump: (Int, Boolean) -> Unit = { id, keepQuery ->
         val i = visible.indexOf(id)
         if (i >= 0) {
             openPost = null
             webUrl = null
+            if (!keepQuery) query = ""
+            picker = PICK_NONE
             goPage(i)
         }
     }
+
+    val goTab: (Int) -> Unit = { id -> jump(id, false) }
 
     /* 返回键：先退网页预览，再退阅读页，退完才退出 App */
     BackHandler(enabled = webUrl != null || openPost != null) {
@@ -192,6 +218,17 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             webUrl != null -> webUrl = null
             else -> openPost = null
         }
+    }
+
+    /* 顶栏那颗胶囊：导航页换分类、分享/文章页换标签 */
+    val catName = remember(navCat, data) {
+        data?.cats?.firstOrNull { it.id == navCat }?.name.orEmpty()
+    }
+    val filter = when (curId) {
+        3 -> TopFilter("🗂", catName.ifBlank { "全部分类" }) { picker = PICK_CAT }
+        1 -> TopFilter("🏷", feedTag.ifBlank { "全部标签" }) { picker = PICK_FEED_TAG }
+        2 -> TopFilter("🏷", postTag.ifBlank { "全部标签" }) { picker = PICK_POST_TAG }
+        else -> null
     }
 
     Scaffold(
@@ -206,7 +243,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                     showIcons = prefs.dockIcons
                 ) { id ->
                     val i = visible.indexOf(id)
-                    if (i >= 0) goPage(i)
+                    if (i >= 0) jump(id, false)
                 }
             }
         }
@@ -224,7 +261,6 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                     })
                 }
         ) {
-            val data = ui.data
             when {
                 data == null && ui.booting -> Booting()
                 data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
@@ -233,43 +269,127 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                     openPost!!, { openPost = null }, open, prefs.fontScale,
                     local = local, rememberPos = prefs.rememberPos
                 )
-                /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
-                else -> PullRefresh(
-                    refreshing = ui.refreshing,
-                    onRefresh = { vm.refresh() }
-                ) {
-                    HorizontalPager(
-                        state = pager,
-                        modifier = Modifier.fillMaxSize(),
-                        /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
-                        beyondBoundsPageCount = 1,
-                        key = { visible[it] }
-                    ) { page ->
-                        when (visible[page]) {
-                            0 -> HomeScreen(
-                                data = data,
-                                offline = ui.offline,
-                                onSettings = { goTab(4) },
-                                onOpen = open,
-                                onGoTab = goTab,
-                                onOpenPost = { openPost = it }
-                            )
-                            1 -> FeedScreen(data, open) { goTab(4) }
-                            2 -> PostsScreen(data, { openPost = it }) { goTab(4) }
-                            3 -> LinksScreen(
-                                data, open, { goTab(4) }, prefs.navCollapsed, local
-                            )
-                            5 -> SavedScreen(
-                                data.posts, local,
-                                onOpenPost = { openPost = it },
-                                onSettings = { goTab(4) }
-                            )
-                            else -> SettingsScreen(prefs, vm, open, local)
+                else -> Column(Modifier.fillMaxSize()) {
+                    /* 顶栏在所有页签之上，翻页它不动 —— 跟站点那个 sticky header 一样 */
+                    TopBar(
+                        siteName = data.site.name.ifBlank { "壹号栈" },
+                        dark = dark,
+                        searchText = query,
+                        onHome = { goTab(0) },
+                        /* ✨ = 灵感随记：站点那个页面本来就只有网页版，交给 WebView 打开 */
+                        onIdea = { open(data.site.url.trimEnd('/') + "/#/idea") },
+                        onSaved = { goTab(5) },
+                        onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
+                        onOpenSearch = { searchOpen = true },
+                        filter = filter
+                    )
+                    /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
+                    PullRefresh(
+                        refreshing = ui.refreshing,
+                        onRefresh = { vm.refresh() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        HorizontalPager(
+                            state = pager,
+                            modifier = Modifier.fillMaxSize(),
+                            /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
+                            beyondBoundsPageCount = 1,
+                            key = { visible[it] }
+                        ) { page ->
+                            when (visible[page]) {
+                                0 -> HomeScreen(
+                                    data = data,
+                                    offline = ui.offline,
+                                    onOpen = open,
+                                    onGoTab = goTab,
+                                    onOpenPost = { openPost = it }
+                                )
+                                1 -> FeedScreen(
+                                    data, query, feedTag, open,
+                                    onPickTag = { feedTag = it }
+                                )
+                                2 -> PostsScreen(data, query, postTag) { openPost = it }
+                                3 -> LinksScreen(
+                                    data, query, navCat, open, prefs.navCollapsed, local
+                                )
+                                5 -> SavedScreen(
+                                    data.posts, local,
+                                    onOpenPost = { openPost = it }
+                                )
+                                else -> SettingsScreen(prefs, vm, open, local)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    /* 全站搜索：整屏铺开，键盘起来也够放结果 */
+    if (searchOpen && data != null) {
+        SearchOverlay(
+            data = data,
+            query = query,
+            onQuery = { query = it },
+            onClose = {
+                searchOpen = false
+                focus.clearFocus()
+                keyboard?.hide()
+            },
+            onOpenUrl = { u -> searchOpen = false; open(u) },
+            onOpenPost = { p -> searchOpen = false; openPost = p },
+            onCategory = { c ->
+                /* 从搜索里点分类：要的是「这一类的全部」，关键词清掉 —— 两个字叠着筛只剩几条，反而像没数据 */
+                query = ""
+                navCat = c.id
+                searchOpen = false
+                jump(3, true)
+            },
+            onTab = { id ->
+                /* 「看全部 N 个」那串数字是按全站算的，跳过去必须把该页自己的分类/标签筛清掉 ——
+                   两个筛叠着只剩几条，跟刚才看到的 N 对不上，看着像丢了数据 */
+                when (id) {
+                    1 -> feedTag = ""
+                    2 -> postTag = ""
+                    3 -> navCat = ""
+                }
+                searchOpen = false
+                jump(id, true)
+            }
+        )
+    }
+
+    /* 底部筛选面板：分类 / 标签，三处共用 */
+    if (picker != PICK_NONE && data != null) {
+        val (title, allLabel, items, current, set) = when (picker) {
+            PICK_CAT -> Quint(
+                "全部分类", "全部分类",
+                data.cats.map { PickItem(it.id, it.icon, it.name, it.links.size) },
+                navCat, { v: String -> navCat = v }
+            )
+            PICK_FEED_TAG -> Quint(
+                "按标签筛选", "全部标签",
+                data.feed.flatMap { it.tags }.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .map { PickItem(it.key, "", it.key, it.value) },
+                feedTag, { v: String -> feedTag = v }
+            )
+            else -> Quint(
+                "按标签筛选", "全部标签",
+                data.posts.flatMap { it.tags }.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .map { PickItem(it.key, "", it.key, it.value) },
+                postTag, { v: String -> postTag = v }
+            )
+        }
+        PickerSheet(
+            title = title,
+            allLabel = allLabel,
+            items = items,
+            current = current,
+            onPick = set,
+            onClose = { picker = PICK_NONE }
+        )
     }
 
     /* 发现新版就弹一次；点「稍后」会把 latest 清掉，这次打开不再打扰（下次启动还会问） */
@@ -289,6 +409,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         )
     }
 }
+
+/** 面板参数凑成一包，省得在 when 里写四份重复的具名参数 */
+private data class Quint(
+    val title: String,
+    val allLabel: String,
+    val items: List<PickItem>,
+    val current: String,
+    val set: (String) -> Unit
+)
 
 /**
  * 底部标签栏：照站点手机端的 .dock —— 一颗**悬浮药丸**，不是通到底的横栏。

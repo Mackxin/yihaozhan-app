@@ -82,20 +82,19 @@ import java.util.Locale
 /* ============================ 分享 ============================ */
 
 @Composable
-fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Unit) {
-    var q by remember { mutableStateOf("") }
-    var tag by remember { mutableStateOf("") }
-
+fun FeedScreen(
+    data: AppPayload,
+    query: String,
+    tag: String,
+    onOpen: (String) -> Unit,
+    onPickTag: (String) -> Unit
+) {
     val all = remember(data) { data.feed.sortedByDescending { it.date } }
-    val tags = remember(all) {
-        all.flatMap { it.tags }.groupingBy { it }.eachCount()
-            .entries.sortedByDescending { it.value }.take(12).map { it.key }
-    }
-    val list = remember(q, tag, all) {
+    val list = remember(query, tag, all) {
         all.filter { f ->
             (tag.isEmpty() || f.tags.contains(tag)) &&
-                (q.isBlank() || (f.title + " " + f.desc + " " + f.tags.joinToString(" "))
-                    .lowercase().contains(q.trim().lowercase()))
+                (query.isBlank() || (f.title + " " + f.desc + " " + f.tags.joinToString(" "))
+                    .lowercase().contains(query.trim().lowercase()))
         }
     }
     val groups = remember(list) {
@@ -105,7 +104,7 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
     /* 筛出来的是另一批条目，不回到顶部就会停在原来那个位置，
        看起来像「筛完只剩空白」 */
     val listState = rememberLazyListState()
-    LaunchedEffect(q, tag) { listState.scrollToItem(0) }
+    LaunchedEffect(query, tag) { listState.scrollToItem(0) }
 
     Column(Modifier.fillMaxSize()) {
         /* 页头照站点手机版：眉标 → 大标题 → 说明 → 三张统计卡 */
@@ -115,7 +114,6 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
             "灵感分享",
             "每天一小条，记录正在遇见的工具、灵感与小发现。像刷动态一样，回看这一年的数字足迹。",
             eyebrow = "SHARING · 屿光",
-            onSettings = onSettings,
             side = {
                 StatRow {
                     StatBox("${all.size}", "条分享", Modifier.weight(1f))
@@ -124,19 +122,6 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
                 }
             }
         )
-        SearchField(q, { q = it }, "搜标题、描述、标签", Modifier.padding(horizontal = 20.dp))
-        if (tags.isNotEmpty()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TagChip("全部", { tag = "" }, active = tag.isEmpty())
-                tags.forEach { t -> TagChip(t, { tag = if (tag == t) "" else t }, active = tag == t) }
-            }
-        }
         if (list.isEmpty()) {
             EmptyState("🍃", "没找到", "换个词试试，或者把筛选清掉。")
         } else {
@@ -157,8 +142,8 @@ fun FeedScreen(data: AppPayload, onOpen: (String) -> Unit, onSettings: () -> Uni
                         )
                     }
                     items(items, key = { it.id + it.title }) { f ->
-                        /* 卡片上的标签也能筛：看到「AI」想找同类，不用先滚回顶上那排 */
-                        FeedCard(f, onOpen) { t -> tag = if (tag == t) "" else t }
+                        /* 卡片上的标签也能筛：看到「AI」想找同类，不用滚回顶上去点那颗胶囊 */
+                        FeedCard(f, onOpen) { t -> onPickTag(if (tag == t) "" else t) }
                     }
                 }
             }
@@ -210,28 +195,44 @@ private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit, onTag: (String) -> U
 /* ============================ 文章 ============================ */
 
 @Composable
-fun PostsScreen(data: AppPayload, onOpen: (Post) -> Unit, onSettings: () -> Unit) {
-    val posts = remember(data) { data.posts.sortedByDescending { it.date } }
+fun PostsScreen(
+    data: AppPayload,
+    query: String,
+    tag: String,
+    onOpen: (Post) -> Unit
+) {
+    val all = remember(data) { data.posts.sortedByDescending { it.date } }
+    /* 统计永远是全站口径（头上那三张卡说的是「一共多少」），筛只影响下面那张列表 */
+    val posts = remember(all, query, tag) {
+        all.filter { p ->
+            (tag.isEmpty() || p.tags.contains(tag)) &&
+                (query.isBlank() || (p.title + " " + p.excerpt + " " + p.tags.joinToString(" "))
+                    .lowercase().contains(query.trim().lowercase()))
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         /* 统计跟站点一样是「篇数 / 字数 / 标签数」，字数按正文纯文字数算 */
-        val chars = remember(posts) { posts.sumOf { postChars(it.body) } }
+        val chars = remember(all) { all.sumOf { postChars(it.body) } }
         val (charText, charUnit) = remember(chars) { fmtChars(chars) }
-        val tagCount = remember(posts) { posts.flatMap { it.tags }.toSet().size }
+        val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
         PageHeader(
             "文章",
             "写得长一点的东西：随笔、折腾记录，以及那些值得慢慢想清楚的念头。",
             eyebrow = "WRITING · 手记",
-            onSettings = onSettings,
             side = {
                 StatRow {
-                    StatBox("${posts.size}", "篇文章", Modifier.weight(1f))
+                    StatBox("${all.size}", "篇文章", Modifier.weight(1f))
                     StatBox(charText, charUnit, Modifier.weight(1f))
                     StatBox("$tagCount", "个标签", Modifier.weight(1f))
                 }
             }
         )
         if (posts.isEmpty()) {
-            EmptyState("✍️", "还没有文章", "站点后台「文章」页写一篇，这里就会出来。")
+            if (all.isEmpty()) {
+                EmptyState("✍️", "还没有文章", "站点后台「文章」页写一篇，这里就会出来。")
+            } else {
+                EmptyState("🍃", "没找到", "换个词试试，或者把标签换回「全部标签」。")
+            }
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
@@ -566,23 +567,30 @@ private fun TocSheet(
 @Composable
 fun LinksScreen(
     data: AppPayload,
+    query: String,
+    catId: String,
     onOpen: (String) -> Unit,
-    onSettings: () -> Unit,
     startCollapsed: Boolean = false,
     local: Local? = null
 ) {
-    var q by remember { mutableStateOf("") }
-
     val pal = LocalXyPal.current
-    val cats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
-    val keyword = remember(q) { q.trim().lowercase() }
+    val allCats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
+    /* 「全部分类」选了某一类就只留它 —— 跟顶栏那颗胶囊联动 */
+    val cats = remember(allCats, catId) {
+        if (catId.isBlank()) allCats else allCats.filter { it.id == catId }
+    }
+    val keyword = remember(query) { query.trim().lowercase() }
     val searching = keyword.isNotEmpty()
 
-    /* 搜索时只留有命中的分类，组内也只留命中的链接 —— 搜索结果仍然按分类分组 */
+    /* 搜索时只留有命中的分类，组内也只留命中的链接 —— 搜索结果仍然按分类分组。
+       分类名也算命中：站点那边的 hay 是「站名 + 描述 + 分类名 + 网址」，搜 mac 要能带出整个 MAC 类，
+       这样顶栏搜索里「看全部 N 个站点」的 N 和这里数出来的才一样 */
     val groups = remember(cats, keyword) {
         cats.mapNotNull { c ->
+            val catHit = keyword.isNotEmpty() && c.name.lowercase().contains(keyword)
             val hits = if (keyword.isEmpty()) c.links else c.links.filter { l ->
-                l.name.lowercase().contains(keyword) ||
+                catHit ||
+                    l.name.lowercase().contains(keyword) ||
                     l.desc.lowercase().contains(keyword) ||
                     l.url.lowercase().contains(keyword)
             }
@@ -627,7 +635,6 @@ fun LinksScreen(
             "攒了多年的老书签全收在这一页 —— 共 **${data.stats.cats}** 类、**${data.stats.links}** 个坐标。" +
                 "顶部搜索框随时筛，最近打开过的会排在列表最前面。",
             eyebrow = "NAVIGATION · 航图",
-            onSettings = onSettings,
             /* 点标题也能全部展开/折叠 —— 拇指够得着，比去右上角找按钮省事 */
             onTitleClick = { if (!searching) toggleAll() },
             /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
@@ -645,13 +652,12 @@ fun LinksScreen(
                 }
             }
         )
-        SearchField(q, { q = it }, "搜站点名、描述、网址", Modifier.padding(horizontal = 20.dp))
         /* 搜索时才需要「找到几个」；不搜索时头上那行「共 N 个站点 · M 个分类」已经说清楚了 */
         if (searching) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -882,8 +888,7 @@ private fun lastSyncText(ts: Long): String {
 fun SavedScreen(
     posts: List<Post>,
     local: Local,
-    onOpenPost: (Post) -> Unit,
-    onSettings: () -> Unit
+    onOpenPost: (Post) -> Unit
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
 
@@ -900,7 +905,6 @@ fun SavedScreen(
             "收藏",
             "标了星的、留着待会儿看的，都在这台手机里。",
             eyebrow = "SAVED · 收藏",
-            onSettings = onSettings,
             /* 原来是一条胶囊切换条，挪到页头跟站点的 `.head-toggle` 一个位置、一个样子 */
             side = {
                 Row(
