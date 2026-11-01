@@ -648,12 +648,16 @@ private fun BottomDock(
                 .padding(5.dp)
         ) {
             if (rowH > 0) {
-                /* 高亮块的圆角按位置来（2.6 改）：
-                   只有贴着药丸两端的格子才该跟着药丸的弧走 —— 第一项只圆**左边**两角、
-                   最后一项只圆**右边**两角，中间那些一律直角。
-                   以前全都用 99dp 圆角，于是中间几项也是颗小胶囊，跟两端看着不一样。 */
+                /* 高亮块有两种样式，按「底栏显不显示图标」分开（小宝 2026-11-01 定的）：
+                   · 带图标的这一版 —— 圆角按位置来：贴着药丸两端的格子才跟着药丸的弧走，
+                     第一项只圆**左边**两角、最后一项只圆**右边**两角、中间一律直角；
+                   · 纯文字的那一版 —— 保持原来的整颗胶囊（四项都是 99dp 全圆角），
+                     字少、每格窄，胶囊看着更整。
+                   两种情况都跟着 pager 的连续位置滑，只是形状不同。 */
                 val at = position.roundToInt().coerceIn(0, count - 1)
-                val hlShape = when {
+                val hlShape = if (!showIcons) {
+                    RoundedCornerShape(99.dp)
+                } else when {
                     count <= 1 -> RoundedCornerShape(99.dp)
                     at == 0 -> RoundedCornerShape(topStart = 99.dp, bottomStart = 99.dp)
                     at == count - 1 -> RoundedCornerShape(topEnd = 99.dp, bottomEnd = 99.dp)
