@@ -88,8 +88,10 @@ fun TopBar(
         ) {
             if (top.brandRowVisible) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                /* 品牌：点一下回首页，跟站点 logo 一样。
-                   最宽 150dp —— 站点名再长也不许把右边那排键挤没 */
+                /* 品牌：**只剩站名，不再画左边那颗「栈」方牌**（小宝 2026-11-01：
+                   「app端的这个图标不要了，壹号栈点击可以跳转到页面底部再点返回顶部」）。
+                   点它现在不是回首页 —— 首页时是「到底 / 回顶」的开关，别的页才回首页，
+                   具体动作由 MainActivity 传进来。最宽 150dp，站名再长也不许把右边那排键挤没 */
                 if (top.brand) {
                 Row(
                     Modifier
@@ -98,27 +100,11 @@ fun TopBar(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { onHome() },
+                        ) { onHome() }
+                        /* 只剩文字，左右各补一点内边距，点按区域才不至于只有字那么窄 */
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(pal.glassHi),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        /* 站点那颗 mark 是 SVG 渐变字，这里用渐变文字还原 */
-                        Text(
-                            "栈",
-                            style = TextStyle(
-                                brush = pal.gradText(56f),
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        )
-                    }
-                    Spacer(Modifier.width(11.dp))
                     Text(
                         siteName,
                         fontSize = 16.5.sp,
