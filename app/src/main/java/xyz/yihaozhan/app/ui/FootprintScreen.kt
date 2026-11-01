@@ -227,7 +227,6 @@ fun FootprintScreen(
             }
         }
         }
-        BackToTopFab(listState)
     }
 }
 

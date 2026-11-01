@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowOutward
@@ -64,7 +66,14 @@ import kotlin.math.roundToInt
  * 启动页下次打开生效，清缓存真的删文件。没有摆设开关。
  */
 @Composable
-fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Local) {
+fun SettingsScreen(
+    prefs: Prefs,
+    vm: MainVm,
+    onOpen: (String) -> Unit,
+    local: Local,
+    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState()
+) {
     val ui = vm.ui
     val data = ui.data
     val ctx = LocalContext.current
@@ -86,7 +95,8 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Lo
 
     /* 页头整块当列表第一个 item，往下滑跟着走，不钉在顶上（跟分享/文章/导航一致） */
     LazyColumn(
-        Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {

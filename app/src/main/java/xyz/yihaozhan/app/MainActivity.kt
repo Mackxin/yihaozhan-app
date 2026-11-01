@@ -94,7 +94,7 @@ import xyz.yihaozhan.app.ui.SavedScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
 import xyz.yihaozhan.app.ui.YiTheme
-import xyz.yihaozhan.app.ui.rememberEndToggle
+import xyz.yihaozhan.app.ui.toggleEnd
 import xyz.yihaozhan.app.ui.rememberOpener
 import xyz.yihaozhan.app.ui.enterFade
 import xyz.yihaozhan.app.ui.enterPop
@@ -170,10 +170,20 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
        2.6 起不再占底栏页签 —— 底栏只放四个主页面 + 收藏 + 设置。 */
     var footOpen by rememberSaveable { mutableStateOf(false) }
 
-    /* 首页列表的滚动状态提到这儿持有：顶栏左上角那颗品牌跟首页大标题共用同一份，
-       点一下到底、再点一下回顶（谁点都算数，不会各算各的「到底了没」） */
+    /* 每个页签各有一条滚动状态，统统提到这儿持有。
+       为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：
+       「不再返回首页，只要点击就是滑动到页面底部和返回顶部」），所以它必须在点击那一刻
+       拿到「当前这一页」的 state —— 页面自己 remember 的话外层根本摸不到。
+       顺带好处：翻页回来滚动位置还在（state 是外层的，不随页面组合销毁）。 */
     val homeList = rememberLazyListState()
-    val homeToggle = rememberEndToggle(homeList)
+    val feedList = rememberLazyListState()
+    val postList = rememberLazyListState()
+    val navList = rememberLazyListState()
+    val savedList = rememberLazyListState()
+    val setList = rememberLazyListState()
+    val listForTab = remember(homeList, feedList, postList, navList, savedList, setList) {
+        mapOf(0 to homeList, 1 to feedList, 2 to postList, 3 to navList, 4 to setList, 5 to savedList)
+    }
 
     /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
     var query by rememberSaveable { mutableStateOf("") }
@@ -394,9 +404,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                         searchText = query,
                         /* 自定义入口跟网页端同一份：站点后台「自定义链接」配几条这儿就有几颗 */
                         links = data.links,
-                        /* 品牌（左上角「栈 壹号栈」）：在首页时是「到底 / 回顶」的开关，
-                           不在首页才当「回首页」用 —— 底栏本来就有首页，这里不冲突 */
-                        onHome = { if (curId == 0) homeToggle() else goTab(0) },
+                        /* 品牌（左上角「壹号栈」）：任何页签上都是「到底 / 回顶」，不再回首页。
+                           滚的是当前页那条列表 —— 换成别的页就是滚那一页。 */
+                        onBrandTap = { listForTab[curId]?.let { toggleEnd(scope, it) } },
                         onLink = { l ->
                             /* 站内路由优先跳原生页，剩下的一律交给内置浏览器。
                                站点后台「自定义链接」里常见的就是 #/later、#/about、#/tag/设计 这些，
@@ -483,15 +493,17 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                 1 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     FeedScreen(
                                         data, query, feedTag, open,
-                                        onPickTag = { feedTag = it }
+                                        onPickTag = { feedTag = it },
+                                        listState = feedList
                                     )
                                 }
                                 2 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    PostsScreen(data, query, postTag) { openPost = it }
+                                    PostsScreen(data, query, postTag, { openPost = it }, postList)
                                 }
                                 3 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     LinksScreen(
-                                        data, query, navCat, open, prefs.navCollapsed, local
+                                        data, query, navCat, open, prefs.navCollapsed, local,
+                                        navList
                                     )
                                 }
                                 5 -> Box(Modifier.fillMaxSize().enterRise()) {
@@ -500,11 +512,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                         onOpenPost = { openPost = it },
                                         onOpenUrl = { u -> open(u) },
                                         segHint = savedSegHint,
-                                        onSegHint = { savedSegHint = null }
+                                        onSegHint = { savedSegHint = null },
+                                        listState = savedList
                                     )
                                 }
                                 else -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    SettingsScreen(prefs, vm, open, local)
+                                    SettingsScreen(prefs, vm, open, local, setList)
                                 }
                             }
                         }
@@ -617,7 +630,8 @@ private data class Quint(
 /**
  * 底部标签栏：照站点手机端的 .dock —— 一颗**悬浮药丸**，不是通到底的横栏。
  *
- * 图标默认不显示（设置里能开）：只留文字时药丸只有 ~44dp 高，几乎不抢内容；
+ * 图标默认不显示（设置里能开）：只留文字时药丸只有 ~39dp、连外边距整条 ~51dp，
+ * 几乎不抢内容（2.6.4 又收了一档：行内留白 9dp→6dp、外边距 10/6dp→8/4dp）；
  * 想一眼认出来再去设置里打开图标。按钮的先后顺序和显示隐藏也在设置里改。
  *
  * 高亮是一颗**会滑的胶囊**，位置取 pager 的连续位置（`position`），
@@ -648,7 +662,7 @@ private fun BottomDock(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = 6.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -699,7 +713,10 @@ private fun BottomDock(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) { onPick(id) }
-                            .padding(vertical = if (showIcons) 6.dp else 9.dp),
+                            /* 上下留白两种模式统一 6dp：2.6.4 之前纯文字版是 9dp，
+                               小宝说「图标不显示时 tab 栏可以再矮一点」→ 收掉 3dp，
+                               整条底栏从 ~61dp 降到 ~50dp */
+                            .padding(vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if (showIcons) {

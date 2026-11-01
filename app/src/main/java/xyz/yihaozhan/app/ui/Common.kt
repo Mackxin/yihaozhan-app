@@ -8,7 +8,6 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -63,23 +61,15 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -203,71 +193,32 @@ fun Modifier.enterRise(durationMs: Int = 340): Modifier {
 }
 
 /**
- * 统一的「回到顶部」浮动圆钮：滚过 threshold 个条目才淡入，点一下平滑滚回顶端。
- * 各列表页共用一份，位置/尺寸/退场动画都一致。
- */
-@Composable
-fun BoxScope.BackToTopFab(
-    listState: LazyListState,
-    threshold: Int = 3,
-    bottom: Dp = 22.dp,
-    end: Dp = 14.dp
-) {
-    val pal = LocalXyPal.current
-    val scope = rememberCoroutineScope()
-    val visible by remember { derivedStateOf { listState.firstVisibleItemIndex > threshold } }
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(200)) + scaleIn(tween(200), initialScale = 0.86f),
-        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.86f),
-        modifier = Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom)
-    ) {
-        Box(
-            Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                /* 玻璃底 + 一圈亮边：纯 bgSoft 跟页面底色几乎一样，滚到底会「看不见按钮」 */
-                .background(pal.glass)
-                .border(BorderStroke(1.dp, pal.glassHi), CircleShape)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { scope.launch { listState.animateScrollToItem(0) } },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Rounded.VerticalAlignTop, "回到顶部",
-                tint = pal.dim, modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/**
- * 「点一下到页面底部、再点一下回顶部」的共用动作（首页大标题和顶栏品牌都用这一份）。
+ * 「点一下到页面底部、再点一下回顶部」的共用动作（顶栏的品牌和首页大标题都用这一份）。
  *
  * 判断的是**此刻是不是已经滚到底**，而不是自己记一个「上次点了什么」的开关 ——
  * 用户手动滑到半路再点，落点才不会跟他的预期拧着。
- * 调用方把列表的 LazyListState 交进来即可（状态要由外层持有，两处入口才通同一份）。
+ *
+ * 2.6.4 起不再固定绑一条 state：顶栏那颗「壹号栈」在**任意页签**上都是这个动作
+ * （用户明确要求不再回首页），所以由调用方把当前页的 LazyListState 传进来。
  */
+fun toggleEnd(scope: CoroutineScope, state: LazyListState) {
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    /* 页面还没测量出来（刚切过去/不在屏幕上）就什么都不做，别滚到一个空列表 */
+    if (total <= 0) return
+    val last = info.visibleItemsInfo.lastOrNull()
+    val atEnd = last != null && last.index >= total - 1 &&
+        last.offset + last.size <= info.viewportEndOffset + 8
+    scope.launch {
+        if (atEnd) state.animateScrollToItem(0) else state.animateScrollToItem(total - 1)
+    }
+}
+
+/** 只有一条列表时的便捷版（首页大标题用）：把 scope 一起记好，调用方不关心协程 */
 @Composable
 fun rememberEndToggle(state: LazyListState): () -> Unit {
     val scope = rememberCoroutineScope()
-    val atEnd by remember(state) {
-        derivedStateOf {
-            val info = state.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull()
-            last != null && last.index >= info.totalItemsCount - 1 &&
-                last.offset + last.size <= info.viewportEndOffset + 8
-        }
-    }
-    return {
-        scope.launch {
-            val n = state.layoutInfo.totalItemsCount
-            if (atEnd) state.animateScrollToItem(0)
-            else if (n > 0) state.animateScrollToItem(n - 1)
-        }
-    }
+    return remember(state, scope) { { toggleEnd(scope, state) } }
 }
 
 /**

@@ -130,6 +130,5 @@ fun AboutScreen(
                 }
             }
         }
-        BackToTopFab(listState)
     }
 }

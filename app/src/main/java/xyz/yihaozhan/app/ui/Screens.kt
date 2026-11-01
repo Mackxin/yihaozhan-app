@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -93,7 +94,9 @@ fun FeedScreen(
     query: String,
     tag: String,
     onOpen: (String) -> Unit,
-    onPickTag: (String) -> Unit
+    onPickTag: (String) -> Unit,
+    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState()
 ) {
     val all = remember(data) { data.feed.sortedByDescending { it.date } }
     val list = remember(query, tag, all) {
@@ -109,7 +112,6 @@ fun FeedScreen(
 
     /* 筛出来的是另一批条目，不回到顶部就会停在原来那个位置，
        看起来像「筛完只剩空白」 */
-    val listState = rememberLazyListState()
     LaunchedEffect(query, tag) { listState.scrollToItem(0) }
 
     /* 页头整块也放进列表里当第一个 item —— 一往下滑它就跟着走，
@@ -205,7 +207,6 @@ fun FeedScreen(
             }
         }
     }
-        BackToTopFab(listState)
     }
 
     menuFor?.let { f ->
@@ -293,7 +294,9 @@ fun PostsScreen(
     data: AppPayload,
     query: String,
     tag: String,
-    onOpen: (Post) -> Unit
+    onOpen: (Post) -> Unit,
+    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState()
 ) {
     val all = remember(data) { orderedPosts(data.posts) }
     /* 统计永远是全站口径（头上那三张卡说的是「一共多少」），筛只影响下面那张列表 */
@@ -308,7 +311,6 @@ fun PostsScreen(
     val chars = remember(all) { all.sumOf { postChars(it.body) } }
     val (charText, charUnit) = remember(chars) { fmtChars(chars) }
     val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
-    val listState = rememberLazyListState()
 
     /* 页头是列表的第一项：往下滑就跟着走，不钉在顶上 */
     Box(Modifier.fillMaxSize()) {
@@ -379,7 +381,6 @@ fun PostsScreen(
             }
         }
     }
-        BackToTopFab(listState)
     }
 }
 
@@ -663,7 +664,8 @@ private fun BarIcon(
     }
 }
 
-/** 右下角那颗玻璃小圆（尺寸/配色跟统一的 BackToTopFab 一致，换页不掉档） */
+/** 阅读页右下角那两颗玻璃小圆（回顶 / 目录）。列表页那颗独立的回顶圆钮 2.6.4 已删，
+    回顶改成点顶栏的「壹号栈」；阅读页没有底栏也没有顶栏品牌，所以这组留着。 */
 @Composable
 private fun RoundBtn(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -767,7 +769,9 @@ fun LinksScreen(
     catId: String,
     onOpen: (String) -> Unit,
     startCollapsed: Boolean = false,
-    local: Local? = null
+    local: Local? = null,
+    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState()
 ) {
     val pal = LocalXyPal.current
     val ctx = LocalContext.current
@@ -820,7 +824,6 @@ fun LinksScreen(
     val toggleAll: () -> Unit = { setAll(!allOpen) }
 
     /* 列表条目会随搜索整批换掉，不重置滚动位置就会停在新结果的中段 */
-    val listState = rememberLazyListState()
     LaunchedEffect(keyword) { listState.scrollToItem(0) }
 
     /* 点开一个站点：先记一笔「最近打开」，再交给外面打开。
@@ -831,7 +834,6 @@ fun LinksScreen(
     }
     val recents = local?.recents.orEmpty()
     val scope = rememberCoroutineScope()
-    val farDown = listState.firstVisibleItemIndex > 6
 
     Box(Modifier.fillMaxSize()) {
         /*
@@ -987,14 +989,6 @@ fun LinksScreen(
                     }
                     item(key = "S|" + cat.id) { Spacer(Modifier.height(12.dp)) }
                 }
-        }
-        /* 两千多个站点滑到深处，没这颗圆就回不去了 */
-        if (farDown) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 22.dp)) {
-                RoundBtn(Icons.Rounded.VerticalAlignTop, "回到顶部") {
-                    scope.launch { listState.animateScrollToItem(0) }
-                }
-            }
         }
     }
 
@@ -1297,7 +1291,9 @@ fun SavedScreen(
     /* 外面（顶栏自定义入口 #/later、#/saved）要求「进来就落在哪一段」，
        用一次性 hint 传进来，读完立刻清掉，免得每次重组都把人拽回第一段 */
     segHint: Int? = null,
-    onSegHint: () -> Unit = {}
+    onSegHint: () -> Unit = {},
+    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState()
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(segHint) {
@@ -1336,7 +1332,6 @@ fun SavedScreen(
     }
 
     val shown = if (tab == 0) favs else laters
-    val listState = rememberLazyListState()
     /* 换一段就回到顶部，否则从长列表切到短列表会停在一个越界的位置 */
     LaunchedEffect(tab) { listState.scrollToItem(0) }
 
@@ -1474,6 +1469,5 @@ fun SavedScreen(
                 }
         }
     }
-        BackToTopFab(listState)
     }
 }

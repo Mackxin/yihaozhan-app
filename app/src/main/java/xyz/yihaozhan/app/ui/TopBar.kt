@@ -60,7 +60,7 @@ fun TopBar(
     dark: Boolean,
     searchText: String,
     links: List<SiteLink> = emptyList(),
-    onHome: () -> Unit,
+    onBrandTap: () -> Unit,
     onLink: (SiteLink) -> Unit = {},
     onSaved: () -> Unit,
     onTheme: () -> Unit,
@@ -90,8 +90,10 @@ fun TopBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 /* 品牌：**只剩站名，不再画左边那颗「栈」方牌**（小宝 2026-11-01：
                    「app端的这个图标不要了，壹号栈点击可以跳转到页面底部再点返回顶部」）。
-                   点它现在不是回首页 —— 首页时是「到底 / 回顶」的开关，别的页才回首页，
-                   具体动作由 MainActivity 传进来。最宽 150dp，站名再长也不许把右边那排键挤没 */
+                   2.6.4 起它**在哪个页签上都只是「到底 / 回顶」**，不再兼任「回首页」
+                   （小宝：「不再返回首页，只要点击就是滑动到页面底部和返回顶部」）。
+                   具体滚哪一条列表由 MainActivity 按当前页传进来。
+                   最宽 150dp，站名再长也不许把右边那排键挤没 */
                 if (top.brand) {
                 Row(
                     Modifier
@@ -100,7 +102,7 @@ fun TopBar(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { onHome() }
+                        ) { onBrandTap() }
                         /* 只剩文字，左右各补一点内边距，点按区域才不至于只有字那么窄 */
                         .padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically

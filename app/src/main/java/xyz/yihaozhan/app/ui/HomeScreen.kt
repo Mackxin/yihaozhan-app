@@ -258,7 +258,6 @@ fun HomeScreen(
             }
         }
     }
-        BackToTopFab(listState)
     }
 }
 
