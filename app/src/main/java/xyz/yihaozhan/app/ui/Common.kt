@@ -244,6 +244,33 @@ fun BoxScope.BackToTopFab(
 }
 
 /**
+ * 「点一下到页面底部、再点一下回顶部」的共用动作（首页大标题和顶栏品牌都用这一份）。
+ *
+ * 判断的是**此刻是不是已经滚到底**，而不是自己记一个「上次点了什么」的开关 ——
+ * 用户手动滑到半路再点，落点才不会跟他的预期拧着。
+ * 调用方把列表的 LazyListState 交进来即可（状态要由外层持有，两处入口才通同一份）。
+ */
+@Composable
+fun rememberEndToggle(state: LazyListState): () -> Unit {
+    val scope = rememberCoroutineScope()
+    val atEnd by remember(state) {
+        derivedStateOf {
+            val info = state.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last != null && last.index >= info.totalItemsCount - 1 &&
+                last.offset + last.size <= info.viewportEndOffset + 8
+        }
+    }
+    return {
+        scope.launch {
+            val n = state.layoutInfo.totalItemsCount
+            if (atEnd) state.animateScrollToItem(0)
+            else if (n > 0) state.animateScrollToItem(n - 1)
+        }
+    }
+}
+
+/**
  * 把 `**这段**` 标成重点：站点说明段里的 `<b>` 就是这个效果（正文色 + 700）。
  *
  * 不用整块 Markdown 解析：页头说明只有一件事需要强调 —— 数字。

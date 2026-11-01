@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
@@ -93,6 +94,7 @@ import xyz.yihaozhan.app.ui.SavedScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
 import xyz.yihaozhan.app.ui.YiTheme
+import xyz.yihaozhan.app.ui.rememberEndToggle
 import xyz.yihaozhan.app.ui.rememberOpener
 import xyz.yihaozhan.app.ui.enterFade
 import xyz.yihaozhan.app.ui.enterPop
@@ -167,6 +169,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     /* 足迹（站点 #/insight）：内置页，从顶栏自定义入口那条「👣 足迹」进。
        2.6 起不再占底栏页签 —— 底栏只放四个主页面 + 收藏 + 设置。 */
     var footOpen by rememberSaveable { mutableStateOf(false) }
+
+    /* 首页列表的滚动状态提到这儿持有：顶栏左上角那颗品牌跟首页大标题共用同一份，
+       点一下到底、再点一下回顶（谁点都算数，不会各算各的「到底了没」） */
+    val homeList = rememberLazyListState()
+    val homeToggle = rememberEndToggle(homeList)
 
     /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
     var query by rememberSaveable { mutableStateOf("") }
@@ -387,7 +394,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                         searchText = query,
                         /* 自定义入口跟网页端同一份：站点后台「自定义链接」配几条这儿就有几颗 */
                         links = data.links,
-                        onHome = { goTab(0) },
+                        /* 品牌（左上角「栈 壹号栈」）：在首页时是「到底 / 回顶」的开关，
+                           不在首页才当「回首页」用 —— 底栏本来就有首页，这里不冲突 */
+                        onHome = { if (curId == 0) homeToggle() else goTab(0) },
                         onLink = { l ->
                             /* 站内路由优先跳原生页，剩下的一律交给内置浏览器。
                                站点后台「自定义链接」里常见的就是 #/later、#/about、#/tag/设计 这些，
@@ -467,7 +476,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                         onOpen = open,
                                         onGoTab = goTab,
                                         onOpenPost = { openPost = it },
-                                        onOpenAbout = { aboutOpen = true }
+                                        onOpenAbout = { aboutOpen = true },
+                                        listState = homeList
                                     )
                                 }
                                 1 -> Box(Modifier.fillMaxSize().enterRise()) {

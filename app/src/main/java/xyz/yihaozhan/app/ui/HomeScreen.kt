@@ -2,6 +2,7 @@ package xyz.yihaozhan.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +29,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.FeedItem
 import xyz.yihaozhan.app.data.Post
+import kotlinx.coroutines.launch
 
 /**
  * 首页：站点门面 + 两枚快捷入口 + 最近分享 + 最新文章。
@@ -54,7 +60,10 @@ fun HomeScreen(
     onOpen: (String) -> Unit,
     onGoTab: (Int) -> Unit,
     onOpenPost: (Post) -> Unit,
-    onOpenAbout: () -> Unit = {}
+    onOpenAbout: () -> Unit = {},
+    /* 列表滚动状态可以由外面持有 —— 顶栏左上角那颗品牌也要能「点一下到底 / 再点回顶」，
+       两处入口必须通同一份状态，不然两边的「到底了没」会各算各的 */
+    listState: LazyListState = rememberLazyListState()
 ) {
     val recent = remember(data) { data.feed.sortedByDescending { it.date }.take(5) }
     val latest = remember(data) { orderedPosts(data.posts).take(2) }
@@ -65,8 +74,9 @@ fun HomeScreen(
         if (h.featuredPicks.isEmpty()) emptyList()
         else all.filter { f -> h.featuredPicks.contains(f.date + "|" + f.title) }
     }
-    /* 回顶要一颗 state —— 原来这页没有，滚下去就回不来了 */
-    val listState = rememberLazyListState()
+    /* 点大标题「壹号栈」：一下滑到页面底部，再点一下回到顶部。标题本身留着不动。
+       动作跟顶栏那颗品牌共用一份（Common.kt 的 rememberEndToggle）。 */
+    val toggleEnd = rememberEndToggle(listState)
 
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
@@ -74,7 +84,7 @@ fun HomeScreen(
         state = listState,
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
-        item { Hero(data, offline) }
+        item { Hero(data, offline, toggleEnd) }
 
         item {
             Row(
@@ -255,7 +265,7 @@ fun HomeScreen(
 /* ------------------------------ 门面 ------------------------------ */
 
 @Composable
-private fun Hero(data: AppPayload, offline: Boolean) {
+private fun Hero(data: AppPayload, offline: Boolean, onTitleClick: () -> Unit = {}) {
     val pal = LocalXyPal.current
     Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Column(
@@ -278,7 +288,15 @@ private fun Hero(data: AppPayload, offline: Boolean) {
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.02).em,
                 textAlign = TextAlign.Center,
-                color = pal.text
+                color = pal.text,
+                /* 标题不做任何视觉改动，只是能点：一下到底、再一下回顶（跟站点点标题一个彩蛋） */
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onTitleClick() }
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             )
             if (data.site.slogan.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
