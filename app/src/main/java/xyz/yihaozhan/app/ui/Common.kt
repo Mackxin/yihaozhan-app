@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -108,6 +110,16 @@ fun shareText(ctx: Context, text: String) {
         )
     } catch (e: Exception) {
         Toast.makeText(ctx, "没有能分享的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** 复制一段文字到剪贴板（卡片长按菜单「复制链接」用） */
+fun copyText(ctx: Context, text: String) {
+    try {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("壹号栈", text))
+    } catch (e: Exception) {
+        // 剪贴板被系统限制时静默失败，外面已经弹过 toast
     }
 }
 
@@ -578,15 +590,28 @@ fun CardBox(
     /* 临时的高亮色（比如随机回顾时那张卡闪一下），不给就用默认玻璃底 */
     tint: Color? = null,
     onClick: (() -> Unit)? = null,
+    /* 长按（站点那套右键菜单的触屏版）。给了就自己接管手势，
+       因为 clickable 和 detectTapGestures 抢同一个 pointer 会互相打架 */
+    onLongPress: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val pal = LocalXyPal.current
+    val gesture = when {
+        onLongPress != null -> Modifier.pointerInput(onClick, onLongPress) {
+            detectTapGestures(
+                onTap = { onClick?.invoke() },
+                onLongPress = { onLongPress.invoke() }
+            )
+        }
+        onClick != null -> Modifier.clickable { onClick() }
+        else -> Modifier
+    }
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(XyR.lg.dp))
+            .clip(RoundedCornerShape(pal.rLg.dp))
             .background(tint ?: if (glass) pal.glass else Color.Transparent)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .then(gesture)
             .padding(padding)
     ) { content() }
 }

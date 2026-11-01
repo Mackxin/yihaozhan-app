@@ -53,10 +53,18 @@ fun HomeScreen(
     offline: Boolean,
     onOpen: (String) -> Unit,
     onGoTab: (Int) -> Unit,
-    onOpenPost: (Post) -> Unit
+    onOpenPost: (Post) -> Unit,
+    onOpenAbout: () -> Unit = {}
 ) {
     val recent = remember(data) { data.feed.sortedByDescending { it.date }.take(5) }
-    val latest = remember(data) { data.posts.sortedByDescending { it.date }.take(2) }
+    val latest = remember(data) { orderedPosts(data.posts).take(2) }
+    /* 今日精选：后台指定过就只显示那几条，没指定就跟「最近分享」重了，索性整块不出现 */
+    val featured = remember(data) {
+        val h = data.home ?: return@remember emptyList()
+        val all = data.feed.sortedByDescending { it.date }
+        if (h.featuredPicks.isEmpty()) emptyList()
+        else all.filter { f -> h.featuredPicks.contains(f.date + "|" + f.title) }
+    }
     /* 回顶要一颗 state —— 原来这页没有，滚下去就回不来了 */
     val listState = rememberLazyListState()
 
@@ -90,6 +98,30 @@ fun HomeScreen(
             }
         }
 
+        if (featured.isNotEmpty()) {
+            item {
+                SectionTitle(
+                    data.home?.featuredTitle?.ifBlank { "今日精选" } ?: "今日精选",
+                    "全部", { onGoTab(1) }
+                )
+            }
+            item {
+                val sub = data.home?.featuredDesc.orEmpty()
+                if (sub.isNotBlank()) {
+                    Text(
+                        sub, fontSize = 11.5.sp, lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            items(featured, key = { "hf" + it.id + it.title }) { f ->
+                Box(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                    MiniFeedRow(f, onOpen)
+                }
+            }
+        }
+
         if (recent.isNotEmpty()) {
             item {
                 SectionTitle("最近分享", "全部", { onGoTab(1) })
@@ -110,8 +142,99 @@ fun HomeScreen(
             }
         }
 
+        /* 关于这一栈：站点 `#/about` 那个门，进来先看个大概再走 */
         item {
-            Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp)) {
+            Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp)) {
+                CardBox(onClick = onOpenAbout) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                data.about?.title?.ifBlank { "关于这一栈" } ?: "关于这一栈",
+                                fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                            )
+                            val lede = data.about?.lede.orEmpty()
+                            if (lede.isNotBlank()) {
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    lede, fontSize = 11.5.sp, lineHeight = 18.sp, maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Icon(
+                            Icons.Rounded.ArrowOutward, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        /* 赞助：站点首页最下面那块。App 里没放收款码图（不引图片库），
+           只留文案 + 一颗「在浏览器里看」，真要扫还是回网页 */
+        val home = data.home
+        if (home != null && home.sponsorOn && home.sponsorTitle.isNotBlank()) {
+            item {
+                Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(LocalXyPal.current.rLg.dp))
+                            .background(LocalXyPal.current.glass)
+                            .padding(horizontal = 16.dp, vertical = 16.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("☕", fontSize = 18.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                home.sponsorTitle, fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (home.sponsorDesc.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                home.sponsorDesc, fontSize = 11.5.sp, lineHeight = 19.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (home.sponsorNote.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                home.sponsorNote, fontSize = 11.sp,
+                                color = LocalXyPal.current.mute
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(LocalXyPal.current.glassHi)
+                                .clickable {
+                                    onOpen(
+                                        home.sponsorLink.ifBlank { data.site.url }
+                                    )
+                                }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("在浏览器里看", fontSize = 12.sp, color = LocalXyPal.current.inkA1)
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Rounded.ArrowOutward, null,
+                                tint = LocalXyPal.current.inkA1,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
                 CardBox(onClick = { onOpen(data.site.url) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("在浏览器里打开网站", fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -190,16 +313,31 @@ private fun Hero(data: AppPayload, offline: Boolean) {
                 }
             }
             Spacer(Modifier.height(20.dp))
+            /* 成长天数：站点后台填的「建站日期」算到今天是第几天，跟网页首页那格一个口径。
+               没填日期（老 json）就只显示三格，不留一个「0 天」 */
+            val days = remember(data) { siteDays(data.home?.startDate.orEmpty()) }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatBox("${data.stats.feed}", "条分享", Modifier.weight(1f))
                 StatBox("${data.stats.posts}", "篇文章", Modifier.weight(1f))
                 StatBox("${data.stats.links}", "个站点", Modifier.weight(1f))
+                if (days > 0) StatBox("$days", "天成长", Modifier.weight(1f))
             }
         }
     }
 }
 
 /* --------------------------- 快捷入口 / 小卡片 --------------------------- */
+
+/** `2024-01-01` → 到今天第几天；没填 / 格式不对 → 0（不显示那一格） */
+private fun siteDays(start: String): Int {
+    if (start.length < 10) return 0
+    return runCatching {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.CHINA)
+        val d = fmt.parse(start.substring(0, 10)) ?: return 0
+        val n = ((System.currentTimeMillis() - d.time) / 86400000L).toInt() + 1
+        n.coerceAtLeast(0)
+    }.getOrDefault(0)
+}
 
 @Composable
 private fun QuickCard(
@@ -212,7 +350,7 @@ private fun QuickCard(
     val pal = LocalXyPal.current
     Row(
         modifier
-            .clip(RoundedCornerShape(XyR.md.dp))
+            .clip(RoundedCornerShape(pal.rMd.dp))
             .background(pal.glass)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 14.dp),

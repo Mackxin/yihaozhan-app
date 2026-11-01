@@ -24,10 +24,92 @@ data class AppPayload(
     val links: List<SiteLink> = emptyList(),
     /* 顶栏各块显隐（站点后台「站点信息 → 顶栏显示」）。
        老 app.json 没这个字段 → 用默认 TopCfg()，全开，跟以前一模一样 */
-    val top: TopCfg = TopCfg()
+    val top: TopCfg = TopCfg(),
+    /* 导航页三个显示开关（站点后台「站点信息 → 显示项」）。
+       默认全关 —— 站点那边默认也是「卡片只留名字」 */
+    val nav: NavCfg = NavCfg(),
+    /* 外观：站点后台「主题」页选的那套色。null = 老 json，用 App 内置那套 */
+    val theme: ThemeCfg? = null,
+    /* 首页要用的几块（今日精选 / 赞助 / 建站日期）。null = 老 json */
+    val home: HomeCfg? = null,
+    /* 关于这一页。null = 老 json */
+    val about: AboutCfg? = null
 ) {
     val isEmpty: Boolean get() = feed.isEmpty() && posts.isEmpty() && cats.isEmpty()
 }
+
+/** 导航页卡片上显示什么：左侧彩色图标 / 名字下那行介绍 / 分类名前的 emoji */
+@Serializable
+data class NavCfg(
+    val icons: Boolean = false,
+    val desc: Boolean = false,
+    val catIcon: Boolean = false
+)
+
+/**
+ * 站点的外观配置，值都是 CSS 里读出来的**原样字符串**（`#7c9cff`、`rgba(124,156,255,.055)`、`26px`）。
+ *
+ * 为什么不在这里解析成颜色：主题这份数据是「别人（站点后台）说了算」的，
+ * 一旦格式变了、某个字段空了，解析失败不能把整个 App 弄崩 ——
+ * 所以原样传，由 UI 层的 `sitePal()` 兜底：认不出来就用内置那套。
+ */
+@Serializable
+data class ThemeCfg(
+    val accent: String = "",
+    val accentColor: String = "",
+    val glow: String = "normal",     // strong | normal | off
+    val radius: String = "normal",   // small | normal | large
+    val light: PalCfg = PalCfg(),
+    val dark: PalCfg = PalCfg()
+)
+
+@Serializable
+data class PalCfg(
+    val bg: String = "",
+    val bgSoft: String = "",
+    val glass: String = "",
+    val glass2: String = "",
+    val glassHi: String = "",
+    val text: String = "",
+    val dim: String = "",
+    val mute: String = "",
+    val a1: String = "",
+    val a2: String = "",
+    val a3: String = "",
+    val inkA1: String = "",
+    val inkA2: String = "",
+    val inkA3: String = "",
+    val star: String = "",
+    val rSm: String = "",
+    val rMd: String = "",
+    val rLg: String = "",
+    val rXl: String = ""
+)
+
+/** 首页那几块：建站日期（算成长天数）、今日精选、赞助 */
+@Serializable
+data class HomeCfg(
+    val startDate: String = "",
+    val featuredTitle: String = "今日精选",
+    val featuredDesc: String = "",
+    val featuredCount: Int = 6,
+    /* 指定了哪几条（`日期|标题` 这种 key）；空 = 自动取分享里最新的几条 */
+    val featuredPicks: List<String> = emptyList(),
+    val sponsorOn: Boolean = true,
+    val sponsorTitle: String = "",
+    val sponsorDesc: String = "",
+    val sponsorNote: String = "",
+    val sponsorLink: String = ""
+)
+
+/** 关于这一页：正文是 Markdown，App 用自己那个渲染器画 */
+@Serializable
+data class AboutCfg(
+    val title: String = "",
+    val lede: String = "",
+    val updated: String = "",
+    val md: String = ""
+)
 
 /**
  * 顶栏六块的显隐开关。默认全 true —— 缺字段、老数据、后台没动过，
@@ -106,7 +188,11 @@ data class Post(
     val date: String = "",
     val tags: List<String> = emptyList(),
     val excerpt: String = "",
-    val body: String = ""
+    val body: String = "",
+    /* 站点后台的「置顶」：置顶的先排前面，其余按日期倒序 */
+    val pin: Boolean = false,
+    /* 草稿只在后台可见。新 json 已经在生成时滤掉，这里留着兜旧缓存 */
+    val draft: Boolean = false
 )
 
 /** 解析器：站点以后加字段也不能让 App 崩，所以 ignoreUnknownKeys */

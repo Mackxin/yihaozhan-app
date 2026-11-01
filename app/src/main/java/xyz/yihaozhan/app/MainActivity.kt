@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Refresh
@@ -70,8 +71,10 @@ import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
+import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.FeedScreen
+import xyz.yihaozhan.app.ui.FootprintScreen
 import xyz.yihaozhan.app.ui.HomeScreen
 import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
@@ -93,6 +96,7 @@ import xyz.yihaozhan.app.ui.rememberOpener
 import xyz.yihaozhan.app.ui.enterFade
 import xyz.yihaozhan.app.ui.enterPop
 import xyz.yihaozhan.app.ui.enterRise
+import xyz.yihaozhan.app.ui.orderedPosts
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,16 +104,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val prefs = Prefs.of(this)
         setContent {
+            /* vm 提到主题外面：站点后台「主题」页选的那套外观得在铺底色之前就知道，
+               不然会先画一帧内置配色、再跳成站点配色（闪一下） */
+            val vm: MainVm = viewModel()
             /* 主题跟着设置走：跟随系统 / 浅色 / 深色 */
             val dark = when (prefs.theme) {
                 "light" -> false
                 "dark" -> true
                 else -> isSystemInDarkTheme()
             }
-            YiTheme(dark = dark) {
+            YiTheme(dark = dark, cfg = vm.ui.data?.theme) {
                 /* 极光背景铺在最底下，整页（含状态栏、底栏后面）都是那三团光 */
                 AuroraBackground {
-                    val vm: MainVm = viewModel()
                     AppRoot(vm, prefs, dark)
                 }
             }
@@ -127,7 +133,9 @@ private val TABS = listOf(
     Tab(3, "导航", Icons.Rounded.GridView),
     Tab(4, "设置", Icons.Rounded.Settings),
     /* 1.8 新加的一页：收藏 + 稍后读。id 5，老设置里没有会自动补到末尾 */
-    Tab(5, "收藏", Icons.Rounded.StarBorder)
+    Tab(5, "收藏", Icons.Rounded.StarBorder),
+    /* 2.5 新加：足迹（对应网页端 #/insight）。id 6 */
+    Tab(6, "足迹", Icons.Rounded.History)
 )
 
 fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
@@ -153,6 +161,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     var webUrl by rememberSaveable { mutableStateOf<String?>(null) }
     /* 灵感随记：原生整屏（不再拿 WebView 打开站点那页） */
     var ideaOpen by rememberSaveable { mutableStateOf(false) }
+    /* 关于这一页：站点的 #/about 现在有原生版了，正文从 app.json 的 about 段来 */
+    var aboutOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
     var query by rememberSaveable { mutableStateOf("") }
@@ -161,6 +171,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     var navCat by rememberSaveable { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var picker by remember { mutableStateOf(PICK_NONE) }
+    /* 顶栏自定义入口点 #/later 时，要「进去就停在稍后读那一段」。
+       一次性 hint：SavedScreen 用掉就回调清掉，不然以后每次重组都会被拽回去 */
+    var savedSegHint by remember { mutableStateOf<Int?>(null) }
 
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -214,6 +227,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         openPost = null
         webUrl = null
         ideaOpen = false
+        aboutOpen = false
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -241,10 +255,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
 
     val goTab: (Int) -> Unit = { id -> jump(id, false) }
 
-    /* 返回键：先退网页预览，再退阅读页，退完才退出 App */
-    BackHandler(enabled = webUrl != null || openPost != null) {
+    /* 返回键：先退网页预览，再退阅读页 / 关于页，退完才退出 App */
+    BackHandler(enabled = webUrl != null || openPost != null || aboutOpen) {
         when {
             webUrl != null -> webUrl = null
+            aboutOpen -> aboutOpen = false
             else -> openPost = null
         }
     }
@@ -299,11 +314,55 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                 ideaOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                     IdeaScreen(local) { ideaOpen = false }
                 }
-                openPost != null -> Box(Modifier.fillMaxSize().enterRise()) {
-                    PostDetailScreen(
-                        openPost!!, { openPost = null }, open, prefs.fontScale,
-                        local = local, rememberPos = prefs.rememberPos
-                    )
+                aboutOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                    AboutScreen(data, { aboutOpen = false }, open)
+                }
+                openPost != null -> {
+                    /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
+                       顺序跟文章列表共用 orderedPosts()，滑到的下一篇一定是列表里挨着的那篇。 */
+                    val reader = remember(data) { orderedPosts(data.posts) }
+                    val idx = reader.indexOfFirst { it.id == openPost!!.id }
+                    if (idx < 0) {
+                        /* 兜底：这篇不在列表里（比如刚被删掉）就单篇渲染，不然 pager 建不起来 */
+                        Box(Modifier.fillMaxSize().enterRise()) {
+                            PostDetailScreen(
+                                openPost!!, { openPost = null }, open, prefs.fontScale,
+                                local = local, rememberPos = prefs.rememberPos
+                            )
+                        }
+                    } else {
+                        val postPager = rememberPagerState(initialPage = idx) { reader.size }
+                        /* 手指滑到哪一篇，openPost 就跟着变 —— 返回键、标题栏都读它 */
+                        LaunchedEffect(postPager.currentPage) {
+                            val p = reader.getOrNull(postPager.currentPage)
+                            if (p != null && p.id != openPost?.id) openPost = p
+                        }
+                        Box(Modifier.fillMaxSize().enterRise()) {
+                            HorizontalPager(
+                                state = postPager,
+                                modifier = Modifier.fillMaxSize(),
+                                beyondBoundsPageCount = 1,
+                                key = { i -> reader.getOrElse(i) { Post() }.id }
+                            ) { page ->
+                                val p = reader.getOrNull(page) ?: return@HorizontalPager
+                                PostDetailScreen(
+                                    post = p,
+                                    onBack = { openPost = null },
+                                    onOpen = open,
+                                    fontScale = prefs.fontScale,
+                                    local = local,
+                                    rememberPos = prefs.rememberPos,
+                                    /* 列表是新的在前：下一格更早，上一格更新 */
+                                    older = reader.getOrNull(page + 1),
+                                    newer = reader.getOrNull(page - 1),
+                                    onJump = { t ->
+                                        val j = reader.indexOfFirst { it.id == t.id }
+                                        if (j >= 0) scope.launch { postPager.animateScrollToPage(j) }
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
                 else -> Column(Modifier.fillMaxSize()) {
                     /* 顶栏在所有页签之上，翻页它不动 —— 跟站点那个 sticky header 一样 */
@@ -315,14 +374,45 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                         links = data.links,
                         onHome = { goTab(0) },
                         onLink = { l ->
-                            /* 站内路由优先跳原生页，剩下的一律交给内置浏览器 */
-                            val path = l.url.substringAfter("#/", "").trimEnd('/')
+                            /* 站内路由优先跳原生页，剩下的一律交给内置浏览器。
+                               站点后台「自定义链接」里常见的就是 #/later、#/about、#/tag/设计 这些，
+                               以前只认五个，别的全甩给 WebView —— 明明是同一个站点却像换了个 App。 */
+                            val raw = l.url.substringAfter("#/", "").substringBefore('?').trimEnd('/')
                             when {
-                                path.startsWith("idea") -> ideaOpen = true
-                                path.startsWith("nav") -> goTab(3)
-                                path.startsWith("share") -> goTab(1)
-                                path.startsWith("post") -> goTab(2)
-                                path.startsWith("home") -> goTab(0)
+                                raw.startsWith("idea") -> ideaOpen = true
+                                raw.startsWith("nav") -> goTab(3)
+                                raw.startsWith("share") -> goTab(1)
+                                raw.startsWith("post") -> goTab(2)
+                                raw.startsWith("home") || raw.isEmpty() -> goTab(0)
+                                /* 收藏页三段的定位：#/later 落在「稍后读」，#/saved|#/fav 落在「收藏」 */
+                                raw.startsWith("later") -> { savedSegHint = 1; jump(5, false) }
+                                raw.startsWith("saved") || raw.startsWith("fav") -> {
+                                    savedSegHint = 0; jump(5, false)
+                                }
+                                raw.startsWith("about") -> aboutOpen = true
+                                /* 数据洞察 = 足迹页 */
+                                raw.startsWith("insight") -> goTab(6)
+                                raw.startsWith("tag/") -> {
+                                    val t = runCatching {
+                                        java.net.URLDecoder.decode(
+                                            raw.removePrefix("tag/"), "UTF-8"
+                                        )
+                                    }.getOrDefault(raw.removePrefix("tag/"))
+                                    /* 标签页在站点里是「分享 + 文章」一起筛，App 分两页 —— 
+                                       哪边有这个标签就去哪边，两边都有就先去分享 */
+                                    when {
+                                        t.isBlank() -> goTab(1)
+                                        data.feed.any { it.tags.contains(t) } -> {
+                                            feedTag = t; jump(1, true)
+                                        }
+                                        data.posts.any { it.tags.contains(t) } -> {
+                                            postTag = t; jump(2, true)
+                                        }
+                                        else -> open(
+                                            data.site.url.trimEnd('/') + "/#/tag/" + t
+                                        )
+                                    }
+                                }
                                 else -> open(
                                     if (l.url.startsWith("#")) {
                                         data.site.url.trimEnd('/') + "/" + l.url
@@ -360,7 +450,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                         offline = ui.offline,
                                         onOpen = open,
                                         onGoTab = goTab,
-                                        onOpenPost = { openPost = it }
+                                        onOpenPost = { openPost = it },
+                                        onOpenAbout = { aboutOpen = true }
                                     )
                                 }
                                 1 -> Box(Modifier.fillMaxSize().enterRise()) {
@@ -379,9 +470,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                 }
                                 5 -> Box(Modifier.fillMaxSize().enterRise()) {
                                     SavedScreen(
-                                        data.posts, local,
-                                        onOpenPost = { openPost = it }
+                                        data, local,
+                                        onOpenPost = { openPost = it },
+                                        onOpenUrl = { u -> open(u) },
+                                        segHint = savedSegHint,
+                                        onSegHint = { savedSegHint = null }
                                     )
+                                }
+                                6 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                    FootprintScreen(data, local) { u -> open(u) }
                                 }
                                 else -> Box(Modifier.fillMaxSize().enterRise()) {
                                     SettingsScreen(prefs, vm, open, local)

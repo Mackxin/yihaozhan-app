@@ -47,7 +47,7 @@ fun UpdateDialog(
 ) {
     val pal = LocalXyPal.current
     val info = upd.latest ?: return
-    val shape = RoundedCornerShape(XyR.lg.dp)
+    val shape = RoundedCornerShape(pal.rLg.dp)
 
     AlertDialog(
         onDismissRequest = { if (!upd.downloading) onLater() },

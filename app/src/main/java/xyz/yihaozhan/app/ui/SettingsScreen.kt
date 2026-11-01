@@ -318,6 +318,40 @@ fun SettingsScreen(prefs: Prefs, vm: MainVm, onOpen: (String) -> Unit, local: Lo
                     Spacer(Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
+                            Text("收藏的站点", fontSize = 13.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${local.favLinks.size} 个（导航页长按站点加）",
+                                fontSize = 11.sp, color = LocalXyPal.current.mute
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                local.clearFavLinks()
+                                Toast.makeText(ctx, "已清空站点收藏", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = local.favLinks.isNotEmpty()
+                        ) { Text("清除", fontSize = 13.sp) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("失效标记", fontSize = 13.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${local.dead.size} 个站点标着打不开",
+                                fontSize = 11.sp, color = LocalXyPal.current.mute
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                local.clearDead()
+                                Toast.makeText(ctx, "已全部恢复正常", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = local.dead.isNotEmpty()
+                        ) { Text("恢复", fontSize = 13.sp) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text("阅读记录", fontSize = 13.sp)
                             Spacer(Modifier.height(2.dp))
                             Text(
@@ -414,11 +448,12 @@ private fun GroupTitle(text: String) {
 
 @Composable
 private fun SettingCard(content: @Composable () -> Unit) {
+    val pal = LocalXyPal.current
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(XyR.md.dp))
-            .background(LocalXyPal.current.glass)
+            .clip(RoundedCornerShape(pal.rMd.dp))
+            .background(pal.glass)
             .padding(horizontal = 15.dp, vertical = 15.dp)
     ) { content() }
 }

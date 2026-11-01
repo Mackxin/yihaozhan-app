@@ -544,3 +544,105 @@ private fun PickChip(label: String, active: Boolean, onClick: () -> Unit) {
         )
     }
 }
+
+/* ============================ 卡片长按菜单 ============================ */
+
+/** 长按卡片弹出来的一项动作 */
+data class CardAction(
+    val emoji: String,
+    val label: String,
+    val danger: Boolean = false,
+    val onClick: () -> Unit
+)
+
+/**
+ * 长按站点 / 分享卡片弹出来的底部动作条。
+ *
+ * 站点那边是右键菜单（手机长按同一套），App 里做成底部面板：拇指够得着、
+ * 条目再多也不怕被卡片边缘裁掉。样式跟筛选面板一个模子（26 圆角 + 玻璃底 + 淡入浮起）。
+ */
+@Composable
+fun CardMenu(
+    title: String,
+    sub: String,
+    actions: List<CardAction>,
+    onClose: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0x99000000))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onClose() }
+            )
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                    .background(pal.bgSoft)
+                    .navigationBarsPadding()
+                    .enterPop()
+                    .padding(start = 14.dp, end = 14.dp, top = 18.dp, bottom = 14.dp)
+            ) {
+                Text(
+                    title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = pal.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                if (sub.isNotBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        sub, fontSize = 11.5.sp, color = pal.mute,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                actions.forEach { a ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onClose(); a.onClick() }
+                            .padding(horizontal = 12.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(a.emoji, fontSize = 15.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            a.label, fontSize = 14.sp,
+                            color = if (a.danger) pal.inkA2 else pal.text
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(pal.glass)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onClose() }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("取消", fontSize = 13.5.sp, color = pal.dim)
+                }
+            }
+        }
+    }
+}

@@ -61,6 +61,20 @@ class Local private constructor(ctx: Context) {
     var later: Set<String> by mutableStateOf(readIds("later"))
         private set
 
+    /**
+     * 收藏的**站点网址**。
+     *
+     * 跟上面那对「文章收藏」是两码事：站点那边 `#/nav` 的「只看收藏」、右上那颗星、
+     * 导出书签，认的都是网址。App 以前只有文章维度，网页收藏的站点到手机上看不见，
+     * 这一份把那个口径补上（同样只存本机）。
+     */
+    var favLinks: Set<String> by mutableStateOf(readIds("favLinks"))
+        private set
+
+    /** 标了「失效」的站点网址：卡片淡下去、名字划一道，不再抢视线 */
+    var dead: Set<String> by mutableStateOf(readIds("dead"))
+        private set
+
     /** 最近打开的站点，新的在前 */
     var recents: List<RecentLink> by mutableStateOf(readRecents())
         private set
@@ -87,6 +101,37 @@ class Local private constructor(ctx: Context) {
         if (id.isBlank()) return
         later = if (id in later) later - id else later + id
         writeIds("later", later)
+    }
+
+    /* ------------------------- 站点收藏 / 失效 ------------------------- */
+
+    fun isFavLink(url: String) = url in favLinks
+    fun isDead(url: String) = url in dead
+
+    fun toggleFavLink(url: String): Boolean {
+        if (url.isBlank()) return false
+        val on = url !in favLinks
+        favLinks = if (on) favLinks + url else favLinks - url
+        writeIds("favLinks", favLinks)
+        return on
+    }
+
+    fun toggleDead(url: String): Boolean {
+        if (url.isBlank()) return false
+        val on = url !in dead
+        dead = if (on) dead + url else dead - url
+        writeIds("dead", dead)
+        return on
+    }
+
+    fun clearFavLinks() {
+        favLinks = emptySet()
+        sp.edit().remove("favLinks").apply()
+    }
+
+    fun clearDead() {
+        dead = emptySet()
+        sp.edit().remove("dead").apply()
     }
 
     /* ------------------------------ 最近打开 ------------------------------ */

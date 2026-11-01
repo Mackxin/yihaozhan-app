@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -62,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -80,6 +82,8 @@ import xyz.yihaozhan.app.data.Post
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.widget.Toast
+import androidx.compose.ui.text.style.TextDecoration
 
 /* ============================ 分享 ============================ */
 
@@ -113,6 +117,19 @@ fun FeedScreen(
     val days = remember(all) { all.map { it.date }.filter { it.isNotBlank() }.toSet().size }
     val tagCount = remember(all) { all.flatMap { it.tags }.toSet().size }
 
+    /* 那年今日：往年同月同日写过的（今天这一天，去年/前年是什么样） */
+    val md = remember { mdToday() }
+    val yr = remember { yearNow() }
+    val onThisDay = remember(all, md, yr) {
+        all.filter { f ->
+            f.date.length >= 10 && f.date.substring(5, 10) == md && f.date.take(4) != yr
+        }.take(4)
+    }
+
+    /* 长按卡片弹出的操作菜单（对应站点那份右键菜单的触屏版） */
+    val ctx = LocalContext.current
+    var menuFor by remember { mutableStateOf<FeedItem?>(null) }
+
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
@@ -136,10 +153,40 @@ fun FeedScreen(
                 }
             )
         }
+        /* 那年今日：同月同日、往年写的那些。只在「没筛标签、没搜词」时出现 ——
+           正在找东西的时候顶上插一段回忆，反而碍事 */
+        if (onThisDay.isNotEmpty() && tag.isEmpty() && query.isBlank()) {
+            item(key = "otd-h") {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "📅 那年今日",
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("$md 这一天", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)                }
+            }
+            items(onThisDay, key = { "otd" + it.id + it.title }) { f ->
+                Column {
+                    Text(
+                        f.date.take(4) + " 年",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                    FeedCard(f, onOpen, onLongPress = { menuFor = f }) { t ->
+                        onPickTag(if (tag == t) "" else t)
+                    }
+                }
+            }
+            item(key = "otd-gap") { Spacer(Modifier.height(10.dp)) }
+        }
         if (list.isEmpty()) {
             item(key = "empty") { EmptyState("🍃", "没找到", "换个词试试，或者把筛选清掉。") }
-        } else {
-            groups.forEach { (date, items) ->
+        } else {            groups.forEach { (date, items) ->
                 item(key = "h-$date") {
                     Text(
                         prettyDate(date),
@@ -151,22 +198,52 @@ fun FeedScreen(
                 }
                 items(items, key = { it.id + it.title }) { f ->
                     /* 卡片上的标签也能筛：看到「AI」想找同类，不用滚回顶上去点那颗胶囊 */
-                    FeedCard(f, onOpen) { t -> onPickTag(if (tag == t) "" else t) }
+                    FeedCard(f, onOpen, onLongPress = { menuFor = f }) { t ->
+                        onPickTag(if (tag == t) "" else t)
+                    }
                 }
             }
         }
     }
         BackToTopFab(listState)
     }
+
+    menuFor?.let { f ->
+        val hasUrl = f.url.isNotBlank()
+        CardMenu(
+            title = f.title,
+            sub = if (hasUrl) urlHost(f.url) else "没有链接的一条分享",
+            onClose = { menuFor = null },
+            actions = buildList {
+                if (hasUrl) add(CardAction("🔗", "打开链接") { menuFor = null; onOpen(f.url) })
+                if (hasUrl) add(CardAction("📋", "复制链接") {
+                    menuFor = null
+                    copyText(ctx, f.url)
+                    Toast.makeText(ctx, "链接已复制", Toast.LENGTH_SHORT).show()
+                })
+                add(CardAction("📝", "复制标题与链接") {
+                    menuFor = null
+                    copyText(ctx, (f.title + "\n" + f.url).trim())
+                    Toast.makeText(ctx, "已复制", Toast.LENGTH_SHORT).show()
+                })
+            }
+        )
+    }
 }
 
 @Composable
-private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit, onTag: (String) -> Unit) {
+private fun FeedCard(
+    f: FeedItem,
+    onOpen: (String) -> Unit,
+    onLongPress: () -> Unit,
+    onTag: (String) -> Unit
+) {
     /* 跟站点一样不铺底色：条目靠留白分开，标签胶囊直接浮在极光上 */
     CardBox(
         padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
         glass = false,
-        onClick = if (f.url.isNotBlank()) ({ onOpen(f.url) }) else null
+        onClick = if (f.url.isNotBlank()) ({ onOpen(f.url) }) else null,
+        onLongPress = onLongPress
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Text(f.icon.ifBlank { "•" }, fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
@@ -203,6 +280,14 @@ private fun FeedCard(f: FeedItem, onOpen: (String) -> Unit, onTag: (String) -> U
 
 /* ============================ 文章 ============================ */
 
+/**
+ * 阅读顺序：置顶优先，其余按日期倒序 —— 跟站点 `postList()` 一模一样。
+ * 草稿在这里再滤一次（新生成的 app.json 已经滤过，这一步是给旧缓存兜底）。
+ */
+fun orderedPosts(list: List<Post>): List<Post> =
+    list.filter { !it.draft }
+        .sortedWith(compareByDescending<Post> { it.pin }.thenByDescending { it.date })
+
 @Composable
 fun PostsScreen(
     data: AppPayload,
@@ -210,7 +295,7 @@ fun PostsScreen(
     tag: String,
     onOpen: (Post) -> Unit
 ) {
-    val all = remember(data) { data.posts.sortedByDescending { it.date } }
+    val all = remember(data) { orderedPosts(data.posts) }
     /* 统计永远是全站口径（头上那三张卡说的是「一共多少」），筛只影响下面那张列表 */
     val posts = remember(all, query, tag) {
         all.filter { p ->
@@ -263,7 +348,15 @@ fun PostsScreen(
                     glass = false,
                     onClick = { onOpen(p) }
                 ) {
-                    Text(p.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
+                    Row(verticalAlignment = Alignment.Top) {
+                        if (p.pin) {
+                            Text("📌", fontSize = 13.sp, modifier = Modifier.padding(end = 6.dp, top = 3.dp))
+                        }
+                        Text(
+                            p.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            lineHeight = 24.sp, modifier = Modifier.weight(1f)
+                        )
+                    }
                     if (p.excerpt.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -307,7 +400,12 @@ fun PostDetailScreen(
     onOpen: (String) -> Unit,
     fontScale: Float = 1f,
     local: Local? = null,
-    rememberPos: Boolean = true
+    rememberPos: Boolean = true,
+    /* 列表里排在后面的那篇（更早写的）/ 前面那篇（更新的）。
+       底部做成两张小卡，左右滑动换篇由外层 pager 负责，这里只管按钮 */
+    older: Post? = null,
+    newer: Post? = null,
+    onJump: (Post) -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val pal = LocalXyPal.current
@@ -390,7 +488,9 @@ fun PostDetailScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
+                /* 底部多留一截：右下角那两颗浮动圆（回顶 + 目录）会压到「上一篇/下一篇」卡上，
+                   不避开的话最下面那张卡的标签就被盖住了 */
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 76.dp),
                 verticalArrangement = Arrangement.spacedBy((10 * fontScale).dp)
             ) {
                 item(key = "head") {
@@ -441,6 +541,36 @@ fun PostDetailScreen(
                                 Text("分享", fontSize = 13.sp)
                             }
                         }
+                        /* 读到底了顺手翻下一篇：两颗卡左右各一，跟站点阅读页底部一致。
+                           只有一个方向有货时让它铺满整行，不留半块空地 */
+                        if (older != null || newer != null) {
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (older != null && newer != null) {
+                                    PostNavCard(
+                                        "← 上一篇 · 更早", older, TextAlign.Start,
+                                        Modifier.weight(1f), onJump
+                                    )
+                                    PostNavCard(
+                                        "下一篇 · 更新 →", newer, TextAlign.End,
+                                        Modifier.weight(1f), onJump
+                                    )
+                                } else if (older != null) {
+                                    PostNavCard(
+                                        "← 上一篇 · 更早", older, TextAlign.Start,
+                                        Modifier.fillMaxWidth(), onJump
+                                    )
+                                } else {
+                                    PostNavCard(
+                                        "下一篇 · 更新 →", newer, TextAlign.End,
+                                        Modifier.fillMaxWidth(), onJump
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -472,6 +602,51 @@ fun PostDetailScreen(
                 onDismiss = { showToc = false }
             )
         }
+    }
+}
+
+/**
+ * 阅读页底部那一小张「上一篇 / 下一篇」卡：上面一行小标签说方向，
+ * 下面一行是标题（两行封顶）。没有那一篇就整块不画，不留空壳。
+ */
+@Composable
+private fun PostNavCard(
+    label: String,
+    post: Post?,
+    align: TextAlign,
+    modifier: Modifier = Modifier,
+    onPick: (Post) -> Unit
+) {
+    if (post == null) {
+        /* 占位保持两列等宽：只剩一张卡时它不该被拉成整行 */
+        Spacer(modifier)
+        return
+    }
+    val pal = LocalXyPal.current
+    Column(
+        modifier
+            .clip(RoundedCornerShape(pal.rLg.dp))
+            .background(pal.glass)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onPick(post) }
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Text(label, fontSize = 11.sp, color = pal.mute, textAlign = align,
+            modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(5.dp))
+        Text(
+            post.title,
+            fontSize = 13.5.sp,
+            lineHeight = 20.sp,
+            fontWeight = FontWeight.Medium,
+            color = pal.text,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = align,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -538,7 +713,7 @@ private fun TocSheet(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(12.dp)
-                .clip(RoundedCornerShape(XyR.lg.dp))
+                .clip(RoundedCornerShape(pal.rLg.dp))
                 .background(pal.bgSoft)
                 .padding(vertical = 14.dp)
         ) {
@@ -595,6 +770,7 @@ fun LinksScreen(
     local: Local? = null
 ) {
     val pal = LocalXyPal.current
+    val ctx = LocalContext.current
     val allCats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
     /* 「全部分类」选了某一类就只留它 —— 跟顶栏那颗胶囊联动 */
     val cats = remember(allCats, catId) {
@@ -603,10 +779,17 @@ fun LinksScreen(
     val keyword = remember(query) { query.trim().lowercase() }
     val searching = keyword.isNotEmpty()
 
+    /* 站点收藏（网址维度）——跟站点那边「只看收藏」一个口径 */
+    val favSet = local?.favLinks.orEmpty()
+    val deadSet = local?.dead.orEmpty()
+    var onlyFav by rememberSaveable { mutableStateOf(false) }
+    /* 长按弹出的那张菜单：记网址，渲染时再取名字 */
+    var menuFor by remember { mutableStateOf<LinkItem?>(null) }
+
     /* 搜索时只留有命中的分类，组内也只留命中的链接 —— 搜索结果仍然按分类分组。
        分类名也算命中：站点那边的 hay 是「站名 + 描述 + 分类名 + 网址」，搜 mac 要能带出整个 MAC 类，
        这样顶栏搜索里「看全部 N 个站点」的 N 和这里数出来的才一样 */
-    val groups = remember(cats, keyword) {
+    val groups = remember(cats, keyword, onlyFav, favSet) {
         cats.mapNotNull { c ->
             val catHit = keyword.isNotEmpty() && c.name.lowercase().contains(keyword)
             val hits = if (keyword.isEmpty()) c.links else c.links.filter { l ->
@@ -615,7 +798,8 @@ fun LinksScreen(
                     l.desc.lowercase().contains(keyword) ||
                     l.url.lowercase().contains(keyword)
             }
-            if (hits.isEmpty()) null else c to hits
+            val shown = if (onlyFav) hits.filter { it.url in favSet } else hits
+            if (shown.isEmpty()) null else c to shown
         }
     }
 
@@ -679,6 +863,13 @@ fun LinksScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
+                            /* 只看收藏：只有真收藏过才露出来，免得空按 */
+                            if (favSet.isNotEmpty()) {
+                                HeadPill(
+                                    "⭐ 收藏 ${favSet.size}",
+                                    active = onlyFav
+                                ) { onlyFav = !onlyFav }
+                            }
                             /* 搜索时是强制展开的，这个按钮就没意义了 */
                             if (!searching) {
                                 HeadPill(if (allOpen) "全部折叠" else "全部展开") { toggleAll() }
@@ -698,7 +889,14 @@ fun LinksScreen(
                 }
             }
             if (groups.isEmpty()) {
-                item(key = "empty") { EmptyState("🔍", "没找到", "换个关键词试试。") }
+                item(key = "empty") {
+                    when {
+                        onlyFav && !searching ->
+                            EmptyState("⭐️", "还没收藏站点", "长按任意一个站点，点「收藏」就收到这儿。")
+                        onlyFav -> EmptyState("🔍", "收藏里没找到", "取消「只看收藏」再试一次。")
+                        else -> EmptyState("🔍", "没找到", "换个关键词试试。")
+                    }
+                }
             }
             /* 最近打开：搜索时不显示（那时候你要的是「找到什么」，
                    不是「刚看了什么」） */                if (!searching && recents.isNotEmpty()) {
@@ -731,7 +929,8 @@ fun LinksScreen(
                 groups.forEach { (cat, links) ->
                     item(key = "H|" + cat.id) {
                         CatHeader(
-                            icon = cat.icon,
+                            /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
+                            icon = if (data.nav.catIcon) cat.icon else "",
                             name = cat.name,
                             count = links.size,
                             open = isOpen(cat.id),
@@ -745,14 +944,43 @@ fun LinksScreen(
                     }
                     if (isOpen(cat.id)) {
                         item(key = "B|" + cat.id) {
-                            FlowRow(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 2.dp, start = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                verticalArrangement = Arrangement.spacedBy(7.dp)
-                            ) {
-                                links.forEach { l -> LinkChip(l) { visit(l.name, l.url) } }
+                            /* 「显示项 → 介绍」开着就一行一个（名字 + 介绍），
+                               否则还是标签云 —— 跟网页端「卡片列表 / 紧凑标签」两种密度对得上 */
+                            if (data.nav.desc) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(top = 2.dp, start = 4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    links.forEach { l ->
+                                        LinkRow(
+                                            link = l,
+                                            fav = l.url in favSet,
+                                            dead = l.url in deadSet,
+                                            showIcon = data.nav.icons,
+                                            onLongPress = { menuFor = l },
+                                            onOpen = { visit(l.name, l.url) }
+                                        )
+                                    }
+                                }
+                            } else {
+                                FlowRow(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 2.dp, start = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    links.forEach { l ->
+                                        LinkChip(
+                                            l,
+                                            fav = l.url in favSet,
+                                            dead = l.url in deadSet,
+                                            showIcon = data.nav.icons,
+                                            onOpen = { visit(l.name, l.url) },
+                                            onLongPress = { menuFor = l }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -767,6 +995,44 @@ fun LinksScreen(
                 }
             }
         }
+    }
+
+    /* 长按卡片弹出来的那几件事：收藏 / 复制链接 / 标记失效 */
+    menuFor?.let { l ->
+        val fav = l.url in favSet
+        val dead = l.url in deadSet
+        CardMenu(
+            title = l.name,
+            sub = l.url,
+            actions = listOfNotNull(
+                CardAction(if (fav) "☆" else "⭐", if (fav) "取消收藏" else "收藏到本机") {
+                    if (local != null) {
+                        val on = local.toggleFavLink(l.url)
+                        Toast.makeText(
+                            ctx, if (on) "已收藏，导航页可「只看收藏」" else "已取消收藏",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                CardAction("🔗", "复制链接") {
+                    copyText(ctx, l.url)
+                    Toast.makeText(ctx, "链接已复制", Toast.LENGTH_SHORT).show()
+                },
+                CardAction(
+                    "⚠️", if (dead) "恢复正常" else "标记失效（打不开了）",
+                    danger = !dead
+                ) {
+                    if (local != null) {
+                        val on = local.toggleDead(l.url)
+                        Toast.makeText(
+                            ctx, if (on) "已标记失效，卡片会淡下去" else "已恢复正常",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            ),
+            onClose = { menuFor = null }
+        )
     }
 }
 
@@ -800,16 +1066,20 @@ private fun CatHeader(
             .padding(horizontal = 4.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(icon.ifBlank { name.take(1) }, fontSize = 13.sp)
+        /* 站点后台「显示项 → 分类图标」关着就整块不画（网页端也是纯文字小标题），
+           开着但这一类本来就配了 emoji 才显示 */
+        if (icon.isNotBlank()) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(icon, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(9.dp))
         }
-        Spacer(Modifier.width(9.dp))
         Text(
             name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -836,29 +1106,123 @@ private fun CatHeader(
  * 用的都是 emoji，反而花）。
  */
 @Composable
-private fun LinkChip(link: LinkItem, onOpen: () -> Unit) {
+private fun LinkChip(
+    link: LinkItem,
+    fav: Boolean = false,
+    dead: Boolean = false,
+    /* 站点后台「显示项 → 图标」开着时，名字前面带一个小 emoji */
+    showIcon: Boolean = false,
+    /* onOpen 故意放最后：老的 `LinkChip(item) { 打开 }` 尾随 lambda 才不会绑错 */
+    onLongPress: () -> Unit = {},
+    onOpen: () -> Unit
+) {
     val pal = LocalXyPal.current
-    Text(
-        link.name,
-        fontSize = 12.5.sp,
-        lineHeight = 17.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        color = pal.text,
-        modifier = Modifier
-            .clip(RoundedCornerShape(XyR.sm.dp))
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(pal.rSm.dp))
             .background(pal.glass)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onOpen() }
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    )
+            /* 不用 combinedClickable：它要 @OptIn(ExperimentalFoundationApi)，
+               而本项目把实验 API 当 error。detectTapGestures 一样能同时拿单击和长按 */
+            .pointerInput(link.url) {
+                detectTapGestures(
+                    onTap = { onOpen() },
+                    onLongPress = { onLongPress() }
+                )
+            }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (fav) {
+            Text("★", fontSize = 10.sp, color = pal.inkA2)
+            Spacer(Modifier.width(4.dp))
+        }
+        if (showIcon && link.icon.isNotBlank()) {
+            Text(link.icon, fontSize = 11.sp)
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            link.name,
+            fontSize = 12.5.sp,
+            lineHeight = 17.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            color = if (dead) pal.mute else pal.text,
+            textDecoration = if (dead) TextDecoration.LineThrough else null
+        )
+    }
+}
+
+/**
+ * 「带介绍」的那一版站点行（站点后台「显示项 → 介绍」打开时才走这条）。
+ *
+ * 标签云适合扫，但想看介绍的时候一行一个才放得下 —— 跟网页端卡片列表一个意思：
+ * 名字一行、介绍（没写介绍就显示域名）一行，收藏的带颗星，失效的压淡加删除线。
+ */
+@Composable
+private fun LinkRow(
+    link: LinkItem,
+    fav: Boolean,
+    dead: Boolean,
+    showIcon: Boolean,
+    onLongPress: () -> Unit,
+    onOpen: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(pal.rMd.dp))
+            .background(pal.glass)
+            .pointerInput(link.url) {
+                detectTapGestures(
+                    onTap = { onOpen() },
+                    onLongPress = { onLongPress() }
+                )
+            }
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (showIcon && link.icon.isNotBlank()) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) { Text(link.icon, fontSize = 13.sp) }
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (fav) {
+                    Text("★", fontSize = 10.sp, color = pal.inkA2)
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    link.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (dead) pal.mute else pal.text,
+                    textDecoration = if (dead) TextDecoration.LineThrough else null
+                )
+            }
+            val sub = link.desc.ifBlank { urlHost(link.url) }
+            if (sub.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    sub, fontSize = 11.5.sp, lineHeight = 16.sp, color = pal.mute,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
 
 /** 「全部展开 / 全部折叠」那颗小胶囊 */
 @Composable
-private fun TinyBtn(text: String, onClick: () -> Unit) {
+fun TinyBtn(text: String, onClick: () -> Unit) {
     val pal = LocalXyPal.current
     Text(
         text,
@@ -877,13 +1241,33 @@ private fun TinyBtn(text: String, onClick: () -> Unit) {
 
 /* ============================ 工具 ============================ */
 
-private fun prettyDate(iso: String): String {
+/** 收藏页「站点」那一段的一行：网址 + 现查到的名字/分类 */
+private data class SavedLink(val name: String, val cat: String, val url: String)
 
+/** 从网址里抠出域名（去掉协议和 www.），列表里显示成一行的第二半 */
+fun urlHost(url: String): String {
+    val s = url.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    return s.substringBefore('/').ifBlank { url }
+}
+
+fun prettyDate(iso: String): String {
     if (iso.length < 10) return iso
     return runCatching {
         val d = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).parse(iso.substring(0, 10))
         if (d == null) iso else SimpleDateFormat("M 月 d 日 · EEEE", Locale.CHINA).format(d)
     }.getOrDefault(iso)
+}
+
+/** 今天的「月-日」：`10-31`。跟 `it.date.substring(5, 10)` 一个口径，用来比「同月同日」 */
+private fun mdToday(): String {
+    val c = java.util.Calendar.getInstance()
+    val m = c.get(java.util.Calendar.MONTH) + 1
+    val d = c.get(java.util.Calendar.DAY_OF_MONTH)
+    return (if (m < 10) "0$m" else "$m") + "-" + (if (d < 10) "0$d" else "$d")
+}
+
+private fun yearNow(): String = System.currentTimeMillis().let {
+    SimpleDateFormat("yyyy", Locale.CHINA).format(Date(it))
 }
 
 private fun lastSyncText(ts: Long): String {
@@ -895,29 +1279,65 @@ private fun lastSyncText(ts: Long): String {
 /* ============================ 收藏 ============================ */
 
 /**
- * 收藏 / 稍后读。
+ * 收藏 / 稍后读 / 站点收藏。
  *
- * 站点那边也有这两个功能，但那是存在你浏览器里的；App 里这一份是本机的，
- * 两边互不同步 —— 也不该同步：`app.json` 只装公共内容，私人标记一律不出手机。
+ * 站点那边「收藏」指的是**站点**（导航页那颗星、「只看收藏」、导出书签），
+ * 而「稍后读」指的是链接；App 以前只有文章维度，网页上标过的站点在手机里看不见。
+ * 现在三段并排：文章收藏 / 文章稍后读 / 站点收藏，口径跟网页端对上了。
  *
- * 两段用胶囊切，比上下铺两段省一屏；标过的文章按日期倒序，跟文章页一个顺序。
+ * 存在本机、不上传：`app.json` 只装公共内容，私人标记一律不出手机。
  */
 @Composable
 fun SavedScreen(
-    posts: List<Post>,
+    data: AppPayload,
     local: Local,
-    onOpenPost: (Post) -> Unit
+    onOpenPost: (Post) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    /* 外面（顶栏自定义入口 #/later、#/saved）要求「进来就落在哪一段」，
+       用一次性 hint 传进来，读完立刻清掉，免得每次重组都把人拽回第一段 */
+    segHint: Int? = null,
+    onSegHint: () -> Unit = {}
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
+    LaunchedEffect(segHint) {
+        if (segHint != null && segHint in 0..2) {
+            tab = segHint
+            onSegHint()
+        }
+    }
 
+    val posts = data.posts
     val favs = remember(local.fav, posts) {
         posts.filter { it.id in local.fav }.sortedByDescending { it.date }
     }
     val laters = remember(local.later, posts) {
         posts.filter { it.id in local.later }.sortedByDescending { it.date }
     }
+
+    /* 站点里网址 → (名字, 分类名)：收藏只存网址，显示时再回 app.json 里查一遍名字；
+       查不到（站点被删了）就退回域名，不至于显示一条裸网址以外什么都没有 */
+    val linkIndex = remember(data) {
+        val m = HashMap<String, Pair<String, String>>()
+        data.cats.forEach { c -> c.links.forEach { l -> m[l.url] = l.name to c.name } }
+        m
+    }
+    val favLinks = local.favLinks
+    val savedLinks = remember(favLinks, linkIndex) {
+        favLinks.map { u ->
+            val hit = linkIndex[u]
+            SavedLink(
+                name = hit?.first
+                    ?: u.removePrefix("https://").removePrefix("http://").trimEnd('/'),
+                cat = hit?.second ?: "",
+                url = u
+            )
+        }.sortedBy { it.name.lowercase() }
+    }
+
     val shown = if (tab == 0) favs else laters
     val listState = rememberLazyListState()
+    /* 换一段就回到顶部，否则从长列表切到短列表会停在一个越界的位置 */
+    LaunchedEffect(tab) { listState.scrollToItem(0) }
 
     /* 页头也是列表的一项：往下滑跟着走，不占着顶上不放 */
     Box(Modifier.fillMaxSize()) {
@@ -930,23 +1350,73 @@ fun SavedScreen(
         item(key = "head") {
             PageHeader(
                 "收藏",
-                "标了星的、留着待会儿看的，都在这台手机里。",
+                "文章标了星的、留着待会儿看的，加上导航里收藏的站点，都在这台手机里。",
                 eyebrow = "SAVED · 收藏",
                 inset = 0.dp,
                 /* 原来是一条胶囊切换条，挪到页头跟站点的 `.head-toggle` 一个位置、一个样子 */
                 side = {
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         HeadPill("收藏 ${favs.size}", active = tab == 0) { tab = 0 }
                         HeadPill("稍后读 ${laters.size}", active = tab == 1) { tab = 1 }
+                        HeadPill("站点 ${savedLinks.size}", active = tab == 2) { tab = 2 }
                     }
                 }
             )
         }
-        if (shown.isEmpty()) {
+        if (tab == 2) {
+            /* ---- 站点收藏 ---- */
+            if (savedLinks.isEmpty()) {
+                item(key = "empty") {
+                    EmptyState("⭐️", "还没收藏站点", "在导航页长按任意一个站点，点「收藏」就收到这儿。")
+                }
+            } else {
+                items(savedLinks, key = { "L" + it.url }) { s ->
+                    CardBox(
+                        padding = PaddingValues(horizontal = 4.dp, vertical = 13.dp),
+                        glass = false,
+                        onClick = { onOpenUrl(s.url) }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    s.name, fontSize = 15.5.sp,
+                                    fontWeight = FontWeight.SemiBold, lineHeight = 22.sp
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    listOf(s.cat, urlHost(s.url)).filter { it.isNotBlank() }
+                                        .joinToString(" · "),
+                                    fontSize = 11.5.sp, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = LocalXyPal.current.mute
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(99.dp))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { local.toggleFavLink(s.url) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Star, "取消收藏",
+                                    tint = LocalXyPal.current.inkA2,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (shown.isEmpty()) {
             item(key = "empty") {
                 if (tab == 0) {
                     EmptyState("⭐️", "还没收藏", "文章右上角那颗星点一下，就收到这儿。")
