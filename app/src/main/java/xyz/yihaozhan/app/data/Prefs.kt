@@ -30,7 +30,7 @@ class Prefs private constructor(ctx: Context) {
     var autoSync by mutableStateOf(sp.getBoolean("autoSync", true))
         private set
 
-    /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 设置 / 5 收藏 / 6 足迹） */
+    /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 设置 / 5 收藏） */
     var startTab by mutableStateOf(sp.getInt("startTab", 0).coerceIn(0, LAST_TAB))
         private set
 
@@ -204,13 +204,15 @@ class Prefs private constructor(ctx: Context) {
         }
 
     companion object {
-        /** 最大 tab 下标。加新页签时只改这里 + MainActivity 的 TABS */
-        const val LAST_TAB = 6
+        /** 最大 tab 下标。加新页签时只改这里 + MainActivity 的 TABS。
+            2.6 把「足迹」从页签挪成内置页，最大值回到 5 ——
+            老设置里存的 6 会被 `filter { it in 0..LAST_TAB }` 自然丢掉，不用另写迁移 */
+        const val LAST_TAB = 5
 
         /** 「设置」页签的下标 —— 常驻，不许隐藏 */
         const val SETTINGS_TAB = 4
 
-        private const val DEFAULT_ORDER = "0,1,2,3,4,5,6"
+        private const val DEFAULT_ORDER = "0,1,2,3,4,5"
 
         /* 全 App 一份：界面要读写同一份状态，ViewModel 也得能读到「自动更新」这个开关 */
         @Volatile

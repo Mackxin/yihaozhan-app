@@ -43,7 +43,9 @@ data class AppPayload(
 data class NavCfg(
     val icons: Boolean = false,
     val desc: Boolean = false,
-    val catIcon: Boolean = false
+    val catIcon: Boolean = false,
+    /* 分类名后面的站点数（👗 次元壁垒 96 那个 96）。站点后台可以关，这里默认开 */
+    val count: Boolean = true
 )
 
 /**

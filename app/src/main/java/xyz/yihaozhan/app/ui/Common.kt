@@ -665,9 +665,19 @@ fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
+        /* 数字按位数缩字号：一行放四张统计卡时每张只剩 ~50dp 宽，
+           「2078」用 21sp 会被折成「207 / 8」。位数越多越小，永远单行 ——
+           softWrap=false 是保底：哪怕算窄了也只会挤，不会断成两行。 */
+        val numSize = when {
+            value.length >= 6 -> 13.sp
+            value.length == 5 -> 14.5.sp
+            value.length == 4 -> 16.5.sp
+            value.length == 3 -> 19.sp
+            else -> 21.sp
+        }
         val numStyle = TextStyle(
-            fontSize = 21.sp,
-            lineHeight = 24.sp,
+            fontSize = numSize,
+            lineHeight = (numSize.value + 3f).sp,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = (-0.02).em
         )
@@ -676,7 +686,9 @@ fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
             /* 浅色主题退回实色 --ink-a1：渐变最浅那段压在白玻璃上只有 ~2:1，
                站点也是这么处理的（html[data-theme="light"] .head-stat b） */
             style = if (pal.dark) numStyle.copy(brush = pal.gradText(120f))
-            else numStyle.copy(color = pal.inkA1)
+            else numStyle.copy(color = pal.inkA1),
+            maxLines = 1,
+            softWrap = false
         )
         Text(
             /* 行高跟站点对齐（span 用正文字号 1.7）：不写死的话卡片会比站点的矮一截 */

@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
@@ -132,10 +133,10 @@ private val TABS = listOf(
     Tab(2, "文章", Icons.AutoMirrored.Rounded.MenuBook),
     Tab(3, "导航", Icons.Rounded.GridView),
     Tab(4, "设置", Icons.Rounded.Settings),
-    /* 1.8 新加的一页：收藏 + 稍后读。id 5，老设置里没有会自动补到末尾 */
-    Tab(5, "收藏", Icons.Rounded.StarBorder),
-    /* 2.5 新加：足迹（对应网页端 #/insight）。id 6 */
-    Tab(6, "足迹", Icons.Rounded.History)
+    /* 1.8 新加的一页：收藏 + 稍后读。id 5，老设置里没有会自动补到末尾。
+       2.5 曾把「足迹」塞成 id 6 的底栏页签，2.6 又挪回顶栏自定义入口了 ——
+       它是内置页（跟灵感随记、关于一样整屏推开），不是页签。id 6 空着不复用。 */
+    Tab(5, "收藏", Icons.Rounded.StarBorder)
 )
 
 fun tabLabel(id: Int): String = TABS.firstOrNull { it.id == id }?.label ?: "?"
@@ -163,6 +164,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     var ideaOpen by rememberSaveable { mutableStateOf(false) }
     /* 关于这一页：站点的 #/about 现在有原生版了，正文从 app.json 的 about 段来 */
     var aboutOpen by rememberSaveable { mutableStateOf(false) }
+    /* 足迹（站点 #/insight）：内置页，从顶栏自定义入口那条「👣 足迹」进。
+       2.6 起不再占底栏页签 —— 底栏只放四个主页面 + 收藏 + 设置。 */
+    var footOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 顶栏那套：搜索词是全局的（导航/分享/文章都拿它筛），三个筛选各自独立 */
     var query by rememberSaveable { mutableStateOf("") }
@@ -228,6 +232,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         webUrl = null
         ideaOpen = false
         aboutOpen = false
+        footOpen = false
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -255,11 +260,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
 
     val goTab: (Int) -> Unit = { id -> jump(id, false) }
 
-    /* 返回键：先退网页预览，再退阅读页 / 关于页，退完才退出 App */
-    BackHandler(enabled = webUrl != null || openPost != null || aboutOpen) {
+    /* 返回键：先退网页预览，再退阅读页 / 内置页，退完才退出 App。
+       2.6 修：灵感随记、足迹、关于这三个内置页以前没进这个判断，
+       按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
+    BackHandler(enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen) {
         when {
             webUrl != null -> webUrl = null
+            ideaOpen -> ideaOpen = false
             aboutOpen -> aboutOpen = false
+            footOpen -> footOpen = false
             else -> openPost = null
         }
     }
@@ -279,7 +288,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
         containerColor = Color.Transparent,
         bottomBar = {
-            if (openPost == null && webUrl == null && !ideaOpen) {
+            /* 底栏只有两个地方该让位：阅读页（要整屏看正文）和站外网页预览。
+               内置页（灵感随记 / 关于 / 足迹）一律留着底栏 —— 用户明确要求：
+               「之后要是还有内置页面都要显示 tab 栏出来」。 */
+            if (openPost == null && webUrl == null) {
                 BottomDock(
                     position = dockPos,
                     current = curId,
@@ -316,6 +328,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                 }
                 aboutOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                     AboutScreen(data, { aboutOpen = false }, open)
+                }
+                footOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                    FootprintScreen(data, local, open) { footOpen = false }
                 }
                 openPost != null -> {
                     /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
@@ -390,8 +405,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                     savedSegHint = 0; jump(5, false)
                                 }
                                 raw.startsWith("about") -> aboutOpen = true
-                                /* 数据洞察 = 足迹页 */
-                                raw.startsWith("insight") -> goTab(6)
+                                /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
+                                   跟网页端顶栏那条「👣 足迹」一个去处 */
+                                raw.startsWith("insight") -> footOpen = true
                                 raw.startsWith("tag/") -> {
                                     val t = runCatching {
                                         java.net.URLDecoder.decode(
@@ -477,9 +493,6 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                         onSegHint = { savedSegHint = null }
                                     )
                                 }
-                                6 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    FootprintScreen(data, local) { u -> open(u) }
-                                }
                                 else -> Box(Modifier.fillMaxSize().enterRise()) {
                                     SettingsScreen(prefs, vm, open, local)
                                 }
@@ -530,7 +543,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         val (title, allLabel, items, current, set) = when (picker) {
             PICK_CAT -> Quint(
                 "全部分类", "全部分类",
-                data.cats.map { PickItem(it.id, it.icon, it.name, it.links.size) },
+                /* emoji 跟「分类图标」那个开关走 —— 网页端面板里关掉就是纯名字，
+                   App 这儿以前无条件带 emoji，两边对不上 */
+                data.cats.map {
+                    PickItem(it.id, if (data.nav.catIcon) it.icon else "", it.name, it.links.size)
+                },
                 navCat, { v: String -> navCat = v }
             )
             PICK_FEED_TAG -> Quint(
@@ -554,7 +571,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             items = items,
             current = current,
             onPick = set,
-            onClose = { picker = PICK_NONE }
+            onClose = { picker = PICK_NONE },
+            /* 分类后面的站点数跟站点后台那个开关走；标签数照旧一直显示 */
+            showCount = if (picker == PICK_CAT) data.nav.count else true
         )
     }
 
@@ -629,13 +648,24 @@ private fun BottomDock(
                 .padding(5.dp)
         ) {
             if (rowH > 0) {
+                /* 高亮块的圆角按位置来（2.6 改）：
+                   只有贴着药丸两端的格子才该跟着药丸的弧走 —— 第一项只圆**左边**两角、
+                   最后一项只圆**右边**两角，中间那些一律直角。
+                   以前全都用 99dp 圆角，于是中间几项也是颗小胶囊，跟两端看着不一样。 */
+                val at = position.roundToInt().coerceIn(0, count - 1)
+                val hlShape = when {
+                    count <= 1 -> RoundedCornerShape(99.dp)
+                    at == 0 -> RoundedCornerShape(topStart = 99.dp, bottomStart = 99.dp)
+                    at == count - 1 -> RoundedCornerShape(topEnd = 99.dp, bottomEnd = 99.dp)
+                    else -> RoundedCornerShape(0.dp)
+                }
                 Box(
                     Modifier
                         .align(Alignment.CenterStart)
                         .offset(x = (itemW + gap) * position)
                         .width(itemW)
                         .height(with(density) { rowH.toDp() })
-                        .background(pal.glassHi, RoundedCornerShape(99.dp))
+                        .background(pal.glassHi, hlShape)
                 )
             }
             Row(

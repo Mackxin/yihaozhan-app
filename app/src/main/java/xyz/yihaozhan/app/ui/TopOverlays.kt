@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -420,7 +422,11 @@ data class PickItem(val id: String, val emoji: String, val label: String, val co
 
 /**
  * 底部选择面板：导航页的「全部分类」、分享/文章页的「全部标签」都走这一个。
- * 站点在手机上也是底部抽屉（`.cat-sheet`），只是它是双列网格，这里用流式胶囊 —— 分类名长短差得远，胶囊更省地方。
+ * 站点在手机上也是底部抽屉，并且是**固定三列**网格 —— 这里对齐它。
+ *
+ * 2.6 改：原来用 FlowRow 流式胶囊，名字长短不同就会自己折行，
+ * 同型号之外的小屏手机还掉成两列、顺带多出一条滚动条（用户截图报过）。
+ * 现在钉死三列，格子高度固定，列数跟手机宽度无关，看着才整齐。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -430,7 +436,9 @@ fun PickerSheet(
     items: List<PickItem>,
     current: String,
     onPick: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    /* 分类名后面的站点数：站点后台「显示项 → 分类显示站点数」说了算 */
+    showCount: Boolean = true
 ) {
     val pal = LocalXyPal.current
     Dialog(
@@ -477,41 +485,28 @@ fun PickerSheet(
                     )
                 }
                 Spacer(Modifier.height(12.dp))
-                val scroll = rememberScrollState()
-                /* 分类有五十来个，滚到边界时最后一行会被切一半 —— 底部压一层渐隐把切口糊掉，
-                   滚到底（没有更多）就不压，免得最后一行看着发白 */
-                val more = scroll.maxValue - scroll.value > 0
-                /* 五十来个分类一股脑铺开，给足屏高就不必滚（原来固定 420dp 会截断、逼你滑） */
+                /* 钉死三列：五十来个分类一行三个 → 十七行，一屏基本能看全。
+                   格子高度压到 34dp、间距 6dp，小屏才不至于非滚不可；
+                   真装不下就滚（面板本身不撑破屏幕）。 */
                 val maxSheetH = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
-                Box(Modifier.heightIn(max = maxSheetH)) {
-                    Column(Modifier.verticalScroll(scroll)) {
-                        FlowRow(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PickChip(allLabel, current.isBlank()) { onPick("") }
-                            items.forEach { p ->
-                                PickChip(
-                                    (if (p.emoji.isNotBlank()) p.emoji + " " else "") + p.label +
-                                        (if (p.count >= 0) " ${p.count}" else ""),
-                                    current == p.id
-                                ) { onPick(p.id) }
-                            }
-                        }
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = maxSheetH),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    item(key = "__all__") {
+                        PickCell(
+                            label = allLabel, emoji = "", active = current.isBlank(),
+                            showCount = false, count = -1
+                        ) { onPick("") }
                     }
-                    if (more) {
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .height(20.dp)
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(Color.Transparent, pal.bgSoft)
-                                    )
-                                )
-                        )
+                    items(items.size, key = { items[it].id }) { i ->
+                        val p = items[i]
+                        PickCell(
+                            label = p.label, emoji = p.emoji, active = current == p.id,
+                            showCount = showCount, count = p.count
+                        ) { onPick(p.id) }
                     }
                 }
             }
@@ -519,12 +514,23 @@ fun PickerSheet(
     }
 }
 
+/* 网格里的一格：左边名字（长了省略），右边站点数。
+   跟站点那排 `.cat-item` 一样的排法（名字 flex:1、数字靠右），两边看着才是一套。 */
 @Composable
-private fun PickChip(label: String, active: Boolean, onClick: () -> Unit) {
+private fun PickCell(
+    label: String,
+    emoji: String,
+    active: Boolean,
+    showCount: Boolean,
+    count: Int,
+    onClick: () -> Unit
+) {
     val pal = LocalXyPal.current
     Box(
         Modifier
-            .clip(RoundedCornerShape(99.dp))
+            .fillMaxWidth()
+            .height(34.dp)
+            .clip(RoundedCornerShape(pal.rSm.dp))
             .then(
                 if (active) Modifier.background(pal.grad())
                 else Modifier.background(pal.glass)
@@ -533,15 +539,32 @@ private fun PickChip(label: String, active: Boolean, onClick: () -> Unit) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .padding(horizontal = 9.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        Text(
-            label,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            color = if (active) XY_INK else pal.dim,
-            maxLines = 1
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                (if (emoji.isNotBlank()) emoji + " " else "") + label,
+                fontSize = 12.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (active) XY_INK else pal.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (showCount && count >= 0) {
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "$count",
+                    fontSize = 10.sp,
+                    color = if (active) XY_INK else pal.mute,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 

@@ -932,7 +932,8 @@ fun LinksScreen(
                             /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
                             icon = if (data.nav.catIcon) cat.icon else "",
                             name = cat.name,
-                            count = links.size,
+                            /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
+                            count = if (data.nav.count) links.size else -1,
                             open = isOpen(cat.id),
                             locked = searching,
                             /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
@@ -1085,7 +1086,7 @@ private fun CatHeader(
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        Text("$count", fontSize = 11.sp, color = pal.mute)
+        if (count >= 0) Text("$count", fontSize = 11.sp, color = pal.mute)
         if (!locked) {
             Spacer(Modifier.width(2.dp))
             Icon(

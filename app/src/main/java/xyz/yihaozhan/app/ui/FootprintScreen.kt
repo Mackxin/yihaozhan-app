@@ -19,6 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,7 +52,10 @@ import java.util.Calendar
 fun FootprintScreen(
     data: AppPayload,
     local: Local,
-    onOpenUrl: (String) -> Unit
+    onOpenUrl: (String) -> Unit,
+    /* 2.6：这页从底栏页签改成了顶栏自定义入口进去的内置页，
+       跟「关于」「灵感随记」一样左上角给一颗返回 */
+    onBack: () -> Unit = {}
 ) {
     val pal = LocalXyPal.current
     val recents = local.recents
@@ -70,9 +77,19 @@ fun FootprintScreen(
     val listState = rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = pal.text)
+            }
+            Text("足迹", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = pal.dim)
+        }
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -208,6 +225,7 @@ fun FootprintScreen(
                     )
                 }
             }
+        }
         }
         BackToTopFab(listState)
     }
