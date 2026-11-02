@@ -1,17 +1,23 @@
 package xyz.yihaozhan.app.ui
 
 import android.content.ActivityNotFoundException
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +44,16 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,7 +84,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -541,6 +556,9 @@ fun SearchField(
 @Composable
 fun TagChip(text: String, onClick: (() -> Unit)? = null, active: Boolean = false) {
     val pal = LocalXyPal.current
+    /* 没显式传回调时，点标签就打开「这个标签的全部内容」那一页（2.7 新增）。
+       这样文章卡、阅读页、分享卡上的标签都不用各自接一遍回调。 */
+    val openTag = LocalOpenTag.current
     Text(
         text,
         fontSize = 12.5.sp,
@@ -552,7 +570,7 @@ fun TagChip(text: String, onClick: (() -> Unit)? = null, active: Boolean = false
                 if (active) Modifier.background(pal.grad())
                 else Modifier.background(pal.glass)
             )
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .clickable { if (onClick != null) onClick() else openTag(text) }
             .padding(horizontal = 12.dp, vertical = 5.dp)
     )
 }
@@ -732,5 +750,82 @@ fun fmtChars(n: Int): Pair<String, String> {
     } else {
         val v = n / 1000.0
         String.format(Locale.US, "%.1f", v).removeSuffix(".0") to "千字"
+    }
+}
+
+
+/* ============================ 标签页入口 ============================ */
+
+/**
+ * 「点标签 → 打开这个标签的独立页」。
+ *
+ * 用组合本地而不是层层传参数：标签胶囊散落在分享卡、文章卡、阅读页三处，
+ * 中间隔了四五层组件，为了一个回调把参数一路串下去不划算。
+ * `MainActivity` 在根部提供一次，谁想用就取。
+ */
+val LocalOpenTag = androidx.compose.runtime.compositionLocalOf<(String) -> Unit> { {} }
+
+/* ============================ 网络图片（收款码） ============================ */
+
+/**
+ * 一张从后台来的图（收款码）。`src` 有两种写法：
+ *  - `data:image/png;base64,…`：后台直接上传的图，随 app.json 一起过来；
+ *  - `https://…/xx.png`：站点上的图片地址。
+ *
+ * 为什么不引 Coil：整个 App 只有这一处要画网络图，为它多一个依赖不划算。
+ * 这里做三件小事：内存缓存（同一张不重复下）、失败给一行小字、加载中给个占位。
+ */
+private val imgClient by lazy { OkHttpClient() }
+private val imgCache = HashMap<String, Bitmap?>()
+
+private fun loadBitmap(src: String): Bitmap? = runCatching {
+    if (src.startsWith("data:", ignoreCase = true)) {
+        val comma = src.indexOf(',')
+        if (comma < 0) return null
+        val b64 = src.substring(comma + 1)
+        val bytes = Base64.decode(b64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    } else {
+        val res = imgClient.newCall(Request.Builder().url(src).build()).execute()
+        res.use { r ->
+            val bytes = r.body?.bytes() ?: return null
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+    }
+}.getOrNull()
+
+@Composable
+fun RemoteImg(
+    src: String,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    val pal = LocalXyPal.current
+    var bmp by remember(src) { mutableStateOf(imgCache[src]) }
+    var failed by remember(src) { mutableStateOf(false) }
+    LaunchedEffect(src) {
+        if (src.isBlank() || imgCache.containsKey(src)) return@LaunchedEffect
+        val b = withContext(Dispatchers.IO) { loadBitmap(src) }
+        imgCache[src] = b
+        if (b == null) failed = true else bmp = b
+    }
+    Box(
+        modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(pal.glass2),
+        contentAlignment = Alignment.Center
+    ) {
+        val b = bmp
+        when {
+            b != null -> Image(
+                bitmap = b.asImageBitmap(),
+                contentDescription = "收款码",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().size(size)
+            )
+            failed -> Text("图打不开", fontSize = 11.sp, color = pal.mute)
+            else -> Text("加载中…", fontSize = 11.sp, color = pal.mute)
+        }
     }
 }

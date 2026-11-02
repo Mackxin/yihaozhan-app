@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -75,6 +76,39 @@ fun FootprintScreen(
             .filter { it.isNotBlank() }.toSet().size
     }
     val listState = rememberLazyListState()
+
+    /* 最常去：本地记着「每个站点点开过几次」，名字优先从站点数据里取（网址改过的老记录兜底用 recents） */
+    val nameByUrl = remember(data) {
+        buildMap {
+            data.cats.forEach { c -> c.links.forEach { l -> put(l.url, l.name) } }
+        }
+    }
+    val tops = local.topVisits(6).map { (url, n) ->
+        Triple(nameByUrl[url] ?: recents.firstOrNull { it.url == url }?.name ?: urlHost(url), url, n)
+    }
+
+    /* 热力图：最近 15 周（7 行 × 15 列），每格一天。
+       颜色深浅只看「那天动了多少下」—— 点开站点、写一条随记各算一次。 */
+    val heat = remember(local.daily) {
+        val today = Calendar.getInstance()
+        /* 让最右一列正好是本周：先退到本周一，再往前推 14 周 */
+        val dow = (today.get(Calendar.DAY_OF_WEEK) + 5) % 7   // 周一 = 0
+        val start = (today.clone() as Calendar).apply {
+            add(Calendar.DATE, -dow - 14 * 7)
+            set(Calendar.HOUR_OF_DAY, 12)
+        }
+        val cells = ArrayList<MutableList<Int>>(7)   // 7 行（周一到周日），每行 15 个计数
+        for (r in 0 until 7) cells.add(ArrayList<Int>(15))
+        for (col in 0 until 15) {
+            for (r in 0 until 7) {
+                val c = (start.clone() as Calendar).apply { add(Calendar.DATE, col * 7 + r) }
+                cells[r].add(local.daily[Local.dayKey(c.timeInMillis)] ?: 0)
+            }
+        }
+        cells
+    }
+    val heatPeak = (heat.flatten().maxOrNull() ?: 0)
+    val heatTotal = heat.sumOf { it.sum() }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -164,6 +198,129 @@ fun FootprintScreen(
                         "柱子是「那条内容自己的日期」，不含你读了多久 —— 阅读时长不上传。",
                         fontSize = 10.5.sp, lineHeight = 16.sp, color = pal.mute
                     )
+                }
+            }
+
+            /* 最常去的几个站点：次数从多到少 */
+            if (tops.isNotEmpty()) {
+                item(key = "top-title") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "最常去", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                            color = pal.mute, modifier = Modifier.weight(1f)
+                        )
+                        Text("点开次数", fontSize = 11.sp, color = pal.mute)
+                    }
+                }
+                item(key = "top-list") {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(pal.rLg.dp))
+                            .background(pal.glass)
+                    ) {
+                        tops.forEachIndexed { i, (name, url, n) ->
+                            if (i > 0) HairLine(Modifier.padding(horizontal = 14.dp))
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { onOpenUrl(url) }
+                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${i + 1}", fontSize = 11.sp, color = pal.mute,
+                                    modifier = Modifier.width(20.dp)
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        name, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        urlHost(url), fontSize = 10.5.sp, color = pal.mute,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text("$n 次", fontSize = 11.5.sp, color = pal.inkA1)
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* 热力图：一天一格，颜色越深那天动得越多 */
+            item(key = "heat") {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(pal.rLg.dp))
+                        .background(pal.glass)
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            "最近 15 周",
+                            fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            if (heatTotal > 0) "共 $heatTotal 次 · 最多的一天 $heatPeak 次" else "还没有记录",
+                            fontSize = 11.sp, color = pal.mute
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        for (r in 0 until 7) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                for (c in 0 until 15) {
+                                    val n = heat[r][c]
+                                    Box(
+                                        Modifier
+                                            .size(14.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(
+                                                when {
+                                                    n <= 0 -> pal.glass2
+                                                    n == 1 -> pal.inkA1.copy(alpha = 0.30f)
+                                                    n <= 3 -> pal.inkA1.copy(alpha = 0.55f)
+                                                    n <= 6 -> pal.inkA1.copy(alpha = 0.78f)
+                                                    else -> pal.inkA1
+                                                }
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("少", fontSize = 10.sp, color = pal.mute)
+                        Spacer(Modifier.width(6.dp))
+                        listOf(0f, 0.30f, 0.55f, 0.78f, 1f).forEach {
+                            Box(
+                                Modifier
+                                    .size(10.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(if (it == 0f) pal.glass2 else pal.inkA1.copy(alpha = it))
+                            )
+                            Spacer(Modifier.width(3.dp))
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text("多", fontSize = 10.sp, color = pal.mute)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "点开站点、写一条随记，各算一次",
+                            fontSize = 10.sp, color = pal.mute
+                        )
+                    }
                 }
             }
 

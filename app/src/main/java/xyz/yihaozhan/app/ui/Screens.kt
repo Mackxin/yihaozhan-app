@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.Local
+import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Py
 import xyz.yihaozhan.app.data.FeedItem
 import xyz.yihaozhan.app.data.LinkItem
@@ -242,7 +243,10 @@ private fun FeedCard(
 ) {
     /* 跟站点一样不铺底色：条目靠留白分开，标签胶囊直接浮在极光上 */
     CardBox(
-        padding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
+        padding = PaddingValues(
+            horizontal = 4.dp,
+            vertical = if (Prefs.of(LocalContext.current).cardDensity == 0) 9.dp else 14.dp
+        ),
         glass = false,
         onClick = if (f.url.isNotBlank()) ({ onOpen(f.url) }) else null,
         onLongPress = onLongPress
@@ -401,6 +405,9 @@ fun PostDetailScreen(
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
     fontScale: Float = 1f,
+    /* 行距倍率与字体（设置 → 阅读）。默认值 = 现在的样子 */
+    lineFactor: Float = 1f,
+    serif: Boolean = false,
     local: Local? = null,
     rememberPos: Boolean = true,
     /* 列表里排在后面的那篇（更早写的）/ 前面那篇（更新的）。
@@ -524,7 +531,7 @@ fun PostDetailScreen(
                 }
                 itemsIndexed(blocks) { i, b ->
                     SelectionContainer {
-                        MdBlockView(b, fontScale)
+                        MdBlockView(b, fontScale, lineFactor, serif)
                     }
                 }
                 item(key = "foot") {
@@ -1162,6 +1169,8 @@ private fun LinkRow(
     onOpen: () -> Unit
 ) {
     val pal = LocalXyPal.current
+    /* 卡片密度（设置 → 列表）：紧凑就少留一点上下白，一屏多看好几条 */
+    val compact = Prefs.of(LocalContext.current).cardDensity == 0
     Row(
         Modifier
             .fillMaxWidth()
@@ -1173,7 +1182,7 @@ private fun LinkRow(
                     onLongPress = { onLongPress() }
                 )
             }
-            .padding(horizontal = 13.dp, vertical = 11.dp),
+            .padding(horizontal = 13.dp, vertical = if (compact) 7.dp else 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showIcon && link.icon.isNotBlank()) {

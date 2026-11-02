@@ -66,6 +66,29 @@ class Prefs private constructor(ctx: Context) {
     var rememberPos by mutableStateOf(sp.getBoolean("rememberPos", true))
         private set
 
+    /* ---------------- 阅读：行距 / 字体（跟站点 read 那份配置对齐） ---------------- */
+
+    /** 行距档位：0 紧凑 / 1 标准 / 2 宽松（对应倍率 1.7 / 1.95 / 2.2，跟网页端同一套） */
+    var readLine by mutableStateOf(sp.getInt("readLine", 1).coerceIn(0, 2))
+        private set
+
+    /** 正文字体：sans 无衬线 / serif 衬线（网页端 read.font 就这两个值） */
+    var readFont by mutableStateOf(sp.getString("readFont", "sans") ?: "sans")
+        private set
+
+    /* ---------------- 首页板块 ---------------- */
+
+    /**
+     * 首页要显示哪些块、按什么顺序 —— 逗号分隔的 key。
+     * 空 = 从来没调过，用 [HOME_BLOCKS] 的默认顺序（老用户升级上来就是原样）。
+     */
+    var homeBlocks by mutableStateOf(sp.getString("homeBlocks", "") ?: "")
+        private set
+
+    /** 卡片密度：0 紧凑（一屏多几行）/ 1 标准 */
+    var cardDensity by mutableStateOf(sp.getInt("cardDensity", 1).coerceIn(0, 1))
+        private set
+
     fun updateTheme(v: String) {
         theme = v
         sp.edit().putString("theme", v).apply()
@@ -114,6 +137,27 @@ class Prefs private constructor(ctx: Context) {
     fun updateRememberPos(v: Boolean) {
         rememberPos = v
         sp.edit().putBoolean("rememberPos", v).apply()
+    }
+
+    fun updateReadLine(v: Int) {
+        readLine = v.coerceIn(0, 2)
+        sp.edit().putInt("readLine", readLine).apply()
+    }
+
+    fun updateReadFont(v: String) {
+        readFont = if (v == "serif") "serif" else "sans"
+        sp.edit().putString("readFont", readFont).apply()
+    }
+
+    fun updateCardDensity(v: Int) {
+        cardDensity = v.coerceIn(0, 1)
+        sp.edit().putInt("cardDensity", cardDensity).apply()
+    }
+
+    /** 首页板块：改显示 / 改顺序都写这一份 */
+    fun updateHomeBlocks(v: List<String>) {
+        homeBlocks = v.joinToString(",")
+        sp.edit().putString("homeBlocks", homeBlocks).apply()
     }
 
     /* ---------------- 底栏排序 / 显隐 ---------------- */
@@ -195,6 +239,46 @@ class Prefs private constructor(ctx: Context) {
             else -> 1f
         }
 
+    /** 行距倍率：交给文章正文排版用 */
+    val lineHeightFactor: Float
+        get() = when (readLine) {
+            0 -> 1.7f
+            2 -> 2.2f
+            else -> 1.95f
+        }
+
+    val lineName: String get() = when (readLine) { 0 -> "紧凑"; 2 -> "宽松"; else -> "标准" }
+    val fontName: String get() = if (readFont == "serif") "衬线" else "无衬线"
+    val densityName: String get() = if (cardDensity == 0) "紧凑" else "标准"
+
+    /**
+     * 真正要画的首页板块：**只包含开着的**，顺序照用户拖过的来。
+     *
+     * 存的是「开着的清单」，空串表示从来没动过（= 全部打开，用默认顺序）。
+     * 早先写成「缺的补到末尾」是错的：那样关掉的板块会被当成缺项补回来，等于关不掉。
+     */
+    val homeBlockList: List<String>
+        get() {
+            val keys = HOME_BLOCKS.map { it.first }
+            val saved = homeBlocks.split(',').map { it.trim() }.filter { it in keys }.distinct()
+            return if (saved.isEmpty()) keys else saved
+        }
+
+    fun toggleHomeBlock(key: String) {
+        val cur = homeBlockList
+        /* 关掉就是移出列表；再打开接到末尾，用户可以在下面那个「顺序」里往上挪 */
+        updateHomeBlocks(if (cur.contains(key)) cur.filter { it != key } else cur + key)
+    }
+
+    fun moveHomeBlock(key: String, dir: Int) {
+        val list = homeBlockList.toMutableList()
+        val from = list.indexOf(key)
+        val to = from + dir
+        if (from < 0 || to < 0 || to >= list.size) return
+        val tmp = list[from]; list[from] = list[to]; list[to] = tmp
+        updateHomeBlocks(list)
+    }
+
     /** 设置页显示的档位名 */
     val fontSizeName: String
         get() = when (fontSize) {
@@ -213,6 +297,19 @@ class Prefs private constructor(ctx: Context) {
         const val SETTINGS_TAB = 4
 
         private const val DEFAULT_ORDER = "0,1,2,3,4,5"
+
+        /** 首页板块：key to 名字。顺序就是默认顺序；设置页「首页板块」直接照这个画 */
+        val HOME_BLOCKS: List<Pair<String, String>> = listOf(
+            "hero" to "大标题与统计",
+            "quick" to "两个快捷入口",
+            "today" to "今日三站",
+            "featured" to "今日精选",
+            "recent" to "最近分享",
+            "latest" to "最新文章",
+            "about" to "关于这一栈",
+            "sponsor" to "赞助",
+            "web" to "在浏览器里打开"
+        )
 
         /* 全 App 一份：界面要读写同一份状态，ViewModel 也得能读到「自动更新」这个开关 */
         @Volatile

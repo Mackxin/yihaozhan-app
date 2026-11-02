@@ -216,10 +216,19 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
 
 /** 单独渲染一个块。文章详情页拿它当 LazyColumn 的 item，目录才跳得准 */
 @Composable
-fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
+fun MdBlockView(
+    b: MdBlock,
+    fontScale: Float = 1f,
+    /* 行距倍率：1 = 原来的松紧。设置页「行距」三档换算好传进来（1.7 / 1.95 / 2.2 除以基准） */
+    lineFactor: Float = 1f,
+    /* 正文字体：站点和设置里都能选衬线 / 无衬线 */
+    serif: Boolean = false
+) {
     val mono = FontFamily.Monospace
     /* 字号倍数来自设置页；行高一起放大，不然大字会挤在一起 */
     fun sz(v: Float) = (v * fontScale).sp
+    fun lh(v: Float) = (v * fontScale * lineFactor).sp
+    val bodyFam = if (serif) FontFamily.Serif else FontFamily.Default
 
     when (b) {
         is MdBlock.Heading -> Text(
@@ -238,7 +247,8 @@ fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
         )
 
         is MdBlock.Para -> Text(
-            inlineMd(b.text), fontSize = sz(15.5f), lineHeight = sz(30f),
+            inlineMd(b.text), fontSize = sz(15.5f), lineHeight = lh(30f),
+            fontFamily = bodyFam,
             color = MaterialTheme.colorScheme.onBackground
         )
 
@@ -254,7 +264,8 @@ fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
             Text(
-                inlineMd(b.text), fontSize = sz(15f), lineHeight = sz(29f),
+                inlineMd(b.text), fontSize = sz(15f), lineHeight = lh(29f),
+                fontFamily = bodyFam,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 12.dp)
             )
@@ -264,7 +275,7 @@ fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
             b.items.forEach {
                 Row {
                     Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
+                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam)
                 }
             }
         }
@@ -272,8 +283,8 @@ fun MdBlockView(b: MdBlock, fontScale: Float = 1f) {
         is MdBlock.Numbers -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             b.items.forEachIndexed { idx, it ->
                 Row {
-                    Text("${idx + 1}.", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = sz(29f))
+                    Text("${idx + 1}.", fontSize = sz(16f), fontFamily = bodyFam, modifier = Modifier.padding(end = 8.dp))
+                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam)
                 }
             }
         }

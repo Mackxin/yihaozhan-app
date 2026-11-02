@@ -79,6 +79,20 @@ class Local private constructor(ctx: Context) {
     var recents: List<RecentLink> by mutableStateOf(readRecents())
         private set
 
+    /**
+     * 每个站点被点开过几次（网址 → 次数）。足迹里的「最常去」就是按它排的。
+     * 跟 `recents` 分工：recents 管「最近」，只留 20 条；这个只管次数，不设上限但会瘦身。
+     */
+    var visits: Map<String, Int> by mutableStateOf(readCounts("visits"))
+        private set
+
+    /**
+     * 每天动了多少下（`2026-11-02` → 次数）：点开站点、写一条随记都算。
+     * 足迹底下那张热力图就是它 —— 只统计「你自己产生的动作」，不算你读了多少字。
+     */
+    var daily: Map<String, Int> by mutableStateOf(readCounts("daily"))
+        private set
+
     /* 阅读位置不进 Compose 状态：它只在进出文章时读一次、离开时写一次，
        进了状态反而会让整篇文章跟着重组。 */
     private var positions: MutableMap<String, String> = readPositions()
@@ -144,6 +158,45 @@ class Local private constructor(ctx: Context) {
         sp.edit()
             .putString("recents", XYJson.encodeToString(RECENT_LIST, recents))
             .apply()
+        bumpVisit(url)
+    }
+
+    /* ------------------------ 次数 / 每日计数 ------------------------ */
+
+    private fun bumpVisit(url: String) {
+        visits = visits + (url to ((visits[url] ?: 0) + 1))
+        /* 两千多个站点随手指点几下就能攒满，超过上限把最少的几条扔掉 */
+        if (visits.size > MAX_VISITS) {
+            visits = visits.entries.sortedByDescending { it.value }.take(MAX_VISITS)
+                .associate { it.key to it.value }
+        }
+        writeCounts("visits", visits)
+        bumpDay()
+    }
+
+    /** 今天 +1。写随记、点站点都走这里，热力图才有东西可画 */
+    fun bumpDay() {
+        val k = dayKey(System.currentTimeMillis())
+        daily = daily + (k to ((daily[k] ?: 0) + 1))
+        if (daily.size > MAX_DAYS) {
+            daily = daily.entries.sortedByDescending { it.key }.take(MAX_DAYS)
+                .associate { it.key to it.value }
+        }
+        writeCounts("daily", daily)
+    }
+
+    /** 最常去的几个站点：次数从多到少，取前 n 条 */
+    fun topVisits(n: Int = 8): List<Pair<String, Int>> =
+        visits.entries.sortedByDescending { it.value }.take(n).map { it.key to it.value }
+
+    fun clearVisits() {
+        visits = emptyMap()
+        sp.edit().remove("visits").apply()
+    }
+
+    fun clearDaily() {
+        daily = emptyMap()
+        sp.edit().remove("daily").apply()
     }
 
     fun clearRecents() {
@@ -209,6 +262,7 @@ class Local private constructor(ctx: Context) {
         )
         ideas = listOf(one) + ideas
         saveIdeas()
+        bumpDay()
         return true
     }
 
@@ -352,6 +406,16 @@ class Local private constructor(ctx: Context) {
             ?: mutableMapOf()
     }.getOrDefault(mutableMapOf())
 
+    private fun readCounts(key: String): Map<String, Int> = runCatching {
+        sp.getString(key, null)
+            ?.let { XYJson.decodeFromString(COUNT_MAP, it) }
+            ?: emptyMap()
+    }.getOrDefault(emptyMap())
+
+    private fun writeCounts(key: String, v: Map<String, Int>) {
+        sp.edit().putString(key, XYJson.encodeToString(COUNT_MAP, v)).apply()
+    }
+
     private fun readIdeas(): List<Idea> = runCatching {
         sp.getString("ideas", null)
             ?.let { XYJson.decodeFromString(IDEA_LIST, it) }
@@ -396,17 +460,30 @@ class Local private constructor(ctx: Context) {
 
     private fun p2(n: Int) = if (n < 10) "0$n" else "$n"
 
+
     companion object {
         private const val MAX_RECENT = 20
         private const val MAX_POS = 60
+        private const val MAX_VISITS = 400
+        private const val MAX_DAYS = 400
 
         private val ID_LIST = ListSerializer(String.serializer())
         private val RECENT_LIST = ListSerializer(RecentLink.serializer())
         private val POS_MAP = MapSerializer(String.serializer(), String.serializer())
         private val IDEA_LIST = ListSerializer(Idea.serializer())
+        private val COUNT_MAP = MapSerializer(String.serializer(), Int.serializer())
 
         @Volatile
         private var inst: Local? = null
+
+        /** 时间戳 → `yyyy-MM-dd`（热力图 / 每日计数的格子 key） */
+        fun dayKey(ts: Long): String {
+            val c = Calendar.getInstance().apply { timeInMillis = ts }
+            val y = c.get(Calendar.YEAR)
+            val m = c.get(Calendar.MONTH) + 1
+            val d = c.get(Calendar.DAY_OF_MONTH)
+            return "$y-" + (if (m < 10) "0$m" else "$m") + "-" + (if (d < 10) "0$d" else "$d")
+        }
 
         fun of(ctx: Context): Local = inst ?: synchronized(this) {
             inst ?: Local(ctx.applicationContext).also { inst = it }

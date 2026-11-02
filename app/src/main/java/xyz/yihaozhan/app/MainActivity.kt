@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,8 @@ import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.ChangelogScreen
+import xyz.yihaozhan.app.ui.LocalOpenTag
+import xyz.yihaozhan.app.ui.TagScreen
 import xyz.yihaozhan.app.ui.FeedScreen
 import xyz.yihaozhan.app.ui.FootprintScreen
 import xyz.yihaozhan.app.ui.HelpScreen
@@ -175,6 +178,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
        进去之后底栏还在、返回键只退这一页。 */
     var helpOpen by rememberSaveable { mutableStateOf(false) }
     var logOpen by rememberSaveable { mutableStateOf(false) }
+    /* 标签页：点任何一个 #标签 打开它，空串 = 没开 */
+    var tagOpen by rememberSaveable { mutableStateOf("") }
 
     /* 每个页签各有一条滚动状态，统统提到这儿持有。
        为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：
@@ -258,6 +263,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         footOpen = false
         helpOpen = false
         logOpen = false
+        tagOpen = ""
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -290,7 +296,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
        按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
-            helpOpen || logOpen
+            helpOpen || logOpen || tagOpen.isNotBlank()
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -299,6 +305,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             footOpen -> footOpen = false
             helpOpen -> helpOpen = false
             logOpen -> logOpen = false
+            tagOpen.isNotBlank() -> tagOpen = ""
             else -> openPost = null
         }
     }
@@ -314,233 +321,259 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         else -> null
     }
 
-    Scaffold(
-        /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
-        containerColor = Color.Transparent,
-        bottomBar = {
-            /* 底栏只有两个地方该让位：阅读页（要整屏看正文）和站外网页预览。
-               内置页（灵感随记 / 关于 / 足迹）一律留着底栏 —— 用户明确要求：
-               「之后要是还有内置页面都要显示 tab 栏出来」。 */
-            if (openPost == null && webUrl == null) {
-                BottomDock(
-                    position = dockPos,
-                    current = curId,
-                    tabs = visible,
-                    showIcons = prefs.dockIcons
-                ) { id ->
-                    val i = visible.indexOf(id)
-                    if (i >= 0) jump(id, false)
+    /* 标签胶囊散在分享卡 / 文章卡 / 阅读页三处，中间隔着好几层，
+       与其一路传回调，不如在这儿提供一次「点标签开哪一页」。*/
+    /* 标签胶囊散在分享卡 / 文章卡 / 阅读页三处，中间隔着好几层，
+       与其一路传回调，不如在这儿提供一次「点标签开哪一页」。 */
+    /* 整屏浮层（搜索结果 / 分类标签面板）要盖住顶栏和底栏，
+       所以跟 Scaffold 平级放在这个 Box 里，而不是塞进 Scaffold 的内容区。
+       以前它们是 Dialog（另开一个窗口）—— 那个窗口只铺到状态栏下沿，
+       浅色主题下会在状态栏那条露出一道压暗的灰带，状态栏图标也会变成白的看不清。 */
+    Box(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalOpenTag provides { t -> tagOpen = t }) {
+            Scaffold(
+                /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
+                containerColor = Color.Transparent,
+                bottomBar = {
+                    /* 底栏只有两个地方该让位：阅读页（要整屏看正文）和站外网页预览。
+                       内置页（灵感随记 / 关于 / 足迹）一律留着底栏 —— 用户明确要求：
+                       「之后要是还有内置页面都要显示 tab 栏出来」。 */
+                    if (openPost == null && webUrl == null) {
+                        BottomDock(
+                            position = dockPos,
+                            current = curId,
+                            tabs = visible,
+                            showIcons = prefs.dockIcons
+                        ) { id ->
+                            val i = visible.indexOf(id)
+                            if (i >= 0) jump(id, false)
+                        }
+                    }
                 }
-            }
-        }
-    ) { pad ->
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(pad)
-                /* 点空白处就收键盘：这里能收到 tap 只说明「没人认领这次点击」——
-                   输入框、卡片这些自己会消费按下事件，所以不会误伤 */
-                .pointerInput(Unit) {
-                    detectTapGestures(onTap = {
-                        focus.clearFocus()
-                        keyboard?.hide()
-                    })
-                }
-        ) {
-            when {
-                data == null && ui.booting -> Booting()
-                data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
-                webUrl != null -> Box(Modifier.fillMaxSize().enterRise()) {
-                    WebScreen(webUrl!!, { webUrl = null }, external, dark)
-                }
-                ideaOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                    IdeaScreen(local) { ideaOpen = false }
-                }
-                aboutOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                    AboutScreen(data, { aboutOpen = false }, open)
-                }
-                footOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                    FootprintScreen(data, local, open) { footOpen = false }
-                }
-                helpOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                    HelpScreen(data) { helpOpen = false }
-                }
-                logOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                    ChangelogScreen(data) { logOpen = false }
-                }
-                openPost != null -> {
-                    /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
-                       顺序跟文章列表共用 orderedPosts()，滑到的下一篇一定是列表里挨着的那篇。 */
-                    val reader = remember(data) { orderedPosts(data.posts) }
-                    val idx = reader.indexOfFirst { it.id == openPost!!.id }
-                    if (idx < 0) {
-                        /* 兜底：这篇不在列表里（比如刚被删掉）就单篇渲染，不然 pager 建不起来 */
-                        Box(Modifier.fillMaxSize().enterRise()) {
-                            PostDetailScreen(
-                                openPost!!, { openPost = null }, open, prefs.fontScale,
-                                local = local, rememberPos = prefs.rememberPos
+            ) { pad ->
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(pad)
+                        /* 点空白处就收键盘：这里能收到 tap 只说明「没人认领这次点击」——
+                           输入框、卡片这些自己会消费按下事件，所以不会误伤 */
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = {
+                                focus.clearFocus()
+                                keyboard?.hide()
+                            })
+                        }
+                ) {
+                    when {
+                        data == null && ui.booting -> Booting()
+                        data == null -> Failed(ui.error ?: "加载失败") { vm.refresh() }
+                        webUrl != null -> Box(Modifier.fillMaxSize().enterRise()) {
+                            WebScreen(webUrl!!, { webUrl = null }, external, dark)
+                        }
+                        ideaOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            IdeaScreen(local) { ideaOpen = false }
+                        }
+                        aboutOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            AboutScreen(data, { aboutOpen = false }, open)
+                        }
+                        footOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            FootprintScreen(data, local, open) { footOpen = false }
+                        }
+                        helpOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            HelpScreen(data) { helpOpen = false }
+                        }
+                        logOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            ChangelogScreen(data) { logOpen = false }
+                        }
+                        tagOpen.isNotBlank() -> Box(Modifier.fillMaxSize().enterRise()) {
+                            TagScreen(
+                                data = data,
+                                tag = tagOpen,
+                                onBack = { tagOpen = "" },
+                                onOpenUrl = { u -> open(u) },
+                                onOpenPost = { p -> openPost = p }
                             )
                         }
-                    } else {
-                        val postPager = rememberPagerState(initialPage = idx) { reader.size }
-                        /* 手指滑到哪一篇，openPost 就跟着变 —— 返回键、标题栏都读它 */
-                        LaunchedEffect(postPager.currentPage) {
-                            val p = reader.getOrNull(postPager.currentPage)
-                            if (p != null && p.id != openPost?.id) openPost = p
-                        }
-                        Box(Modifier.fillMaxSize().enterRise()) {
-                            HorizontalPager(
-                                state = postPager,
-                                modifier = Modifier.fillMaxSize(),
-                                beyondBoundsPageCount = 1,
-                                key = { i -> reader.getOrElse(i) { Post() }.id }
-                            ) { page ->
-                                val p = reader.getOrNull(page) ?: return@HorizontalPager
-                                PostDetailScreen(
-                                    post = p,
-                                    onBack = { openPost = null },
-                                    onOpen = open,
-                                    fontScale = prefs.fontScale,
-                                    local = local,
-                                    rememberPos = prefs.rememberPos,
-                                    /* 列表是新的在前：下一格更早，上一格更新 */
-                                    older = reader.getOrNull(page + 1),
-                                    newer = reader.getOrNull(page - 1),
-                                    onJump = { t ->
-                                        val j = reader.indexOfFirst { it.id == t.id }
-                                        if (j >= 0) scope.launch { postPager.animateScrollToPage(j) }
+                        openPost != null -> {
+                            /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
+                               顺序跟文章列表共用 orderedPosts()，滑到的下一篇一定是列表里挨着的那篇。 */
+                            val reader = remember(data) { orderedPosts(data.posts) }
+                            val idx = reader.indexOfFirst { it.id == openPost!!.id }
+                            if (idx < 0) {
+                                /* 兜底：这篇不在列表里（比如刚被删掉）就单篇渲染，不然 pager 建不起来 */
+                                Box(Modifier.fillMaxSize().enterRise()) {
+                                    PostDetailScreen(
+                                        openPost!!, { openPost = null }, open, prefs.fontScale,
+                                        prefs.lineHeightFactor / 1.95f, prefs.readFont == "serif",
+                                        local = local, rememberPos = prefs.rememberPos
+                                    )
+                                }
+                            } else {
+                                val postPager = rememberPagerState(initialPage = idx) { reader.size }
+                                /* 手指滑到哪一篇，openPost 就跟着变 —— 返回键、标题栏都读它 */
+                                LaunchedEffect(postPager.currentPage) {
+                                    val p = reader.getOrNull(postPager.currentPage)
+                                    if (p != null && p.id != openPost?.id) openPost = p
+                                }
+                                Box(Modifier.fillMaxSize().enterRise()) {
+                                    HorizontalPager(
+                                        state = postPager,
+                                        modifier = Modifier.fillMaxSize(),
+                                        beyondBoundsPageCount = 1,
+                                        key = { i -> reader.getOrElse(i) { Post() }.id }
+                                    ) { page ->
+                                        val p = reader.getOrNull(page) ?: return@HorizontalPager
+                                        PostDetailScreen(
+                                            post = p,
+                                            onBack = { openPost = null },
+                                            onOpen = open,
+                                            fontScale = prefs.fontScale,
+                                            lineFactor = prefs.lineHeightFactor / 1.95f,
+                                            serif = prefs.readFont == "serif",
+                                            local = local,
+                                            rememberPos = prefs.rememberPos,
+                                            /* 列表是新的在前：下一格更早，上一格更新 */
+                                            older = reader.getOrNull(page + 1),
+                                            newer = reader.getOrNull(page - 1),
+                                            onJump = { t ->
+                                                val j = reader.indexOfFirst { it.id == t.id }
+                                                if (j >= 0) scope.launch { postPager.animateScrollToPage(j) }
+                                            }
+                                        )
                                     }
-                                )
+                                }
                             }
                         }
-                    }
-                }
-                else -> Column(Modifier.fillMaxSize()) {
-                    /* 顶栏在所有页签之上，翻页它不动 —— 跟站点那个 sticky header 一样 */
-                    TopBar(
-                        siteName = data.site.name.ifBlank { "壹号栈" },
-                        dark = dark,
-                        searchText = query,
-                        /* 自定义入口跟网页端同一份：站点后台「自定义链接」配几条这儿就有几颗 */
-                        links = data.links,
-                        /* 品牌（左上角「壹号栈」）：任何页签上都是「到底 / 回顶」，不再回首页。
-                           滚的是当前页那条列表 —— 换成别的页就是滚那一页。 */
-                        onBrandTap = { listForTab[curId]?.let { toggleEnd(scope, it) } },
-                        onLink = { l ->
-                            /* 站内路由优先跳原生页，剩下的一律交给内置浏览器。
-                               站点后台「自定义链接」里常见的就是 #/later、#/about、#/tag/设计 这些，
-                               以前只认五个，别的全甩给 WebView —— 明明是同一个站点却像换了个 App。 */
-                            val raw = l.url.substringAfter("#/", "").substringBefore('?').trimEnd('/')
-                            when {
-                                raw.startsWith("idea") -> ideaOpen = true
-                                raw.startsWith("nav") -> goTab(3)
-                                raw.startsWith("share") -> goTab(1)
-                                raw.startsWith("post") -> goTab(2)
-                                raw.startsWith("home") || raw.isEmpty() -> goTab(0)
-                                /* 收藏页三段的定位：#/later 落在「稍后读」，#/saved|#/fav 落在「收藏」 */
-                                raw.startsWith("later") -> { savedSegHint = 1; jump(5, false) }
-                                raw.startsWith("saved") || raw.startsWith("fav") -> {
-                                    savedSegHint = 0; jump(5, false)
-                                }
-                                raw.startsWith("about") -> aboutOpen = true
-                                /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
-                                   跟网页端顶栏那条「👣 足迹」一个去处 */
-                                raw.startsWith("insight") -> footOpen = true
-                                raw.startsWith("tag/") -> {
-                                    val t = runCatching {
-                                        java.net.URLDecoder.decode(
-                                            raw.removePrefix("tag/"), "UTF-8"
-                                        )
-                                    }.getOrDefault(raw.removePrefix("tag/"))
-                                    /* 标签页在站点里是「分享 + 文章」一起筛，App 分两页 —— 
-                                       哪边有这个标签就去哪边，两边都有就先去分享 */
+                        else -> Column(Modifier.fillMaxSize()) {
+                            /* 顶栏在所有页签之上，翻页它不动 —— 跟站点那个 sticky header 一样 */
+                            TopBar(
+                                siteName = data.site.name.ifBlank { "壹号栈" },
+                                dark = dark,
+                                searchText = query,
+                                /* 自定义入口跟网页端同一份：站点后台「自定义链接」配几条这儿就有几颗 */
+                                links = data.links,
+                                /* 品牌（左上角「壹号栈」）：任何页签上都是「到底 / 回顶」，不再回首页。
+                                   滚的是当前页那条列表 —— 换成别的页就是滚那一页。 */
+                                onBrandTap = { listForTab[curId]?.let { toggleEnd(scope, it) } },
+                                onLink = { l ->
+                                    /* 站内路由优先跳原生页，剩下的一律交给内置浏览器。
+                                       站点后台「自定义链接」里常见的就是 #/later、#/about、#/tag/设计 这些，
+                                       以前只认五个，别的全甩给 WebView —— 明明是同一个站点却像换了个 App。 */
+                                    val raw = l.url.substringAfter("#/", "").substringBefore('?').trimEnd('/')
                                     when {
-                                        t.isBlank() -> goTab(1)
-                                        data.feed.any { it.tags.contains(t) } -> {
-                                            feedTag = t; jump(1, true)
+                                        raw.startsWith("idea") -> ideaOpen = true
+                                        raw.startsWith("nav") -> goTab(3)
+                                        raw.startsWith("share") -> goTab(1)
+                                        raw.startsWith("post") -> goTab(2)
+                                        raw.startsWith("home") || raw.isEmpty() -> goTab(0)
+                                        /* 收藏页三段的定位：#/later 落在「稍后读」，#/saved|#/fav 落在「收藏」 */
+                                        raw.startsWith("later") -> { savedSegHint = 1; jump(5, false) }
+                                        raw.startsWith("saved") || raw.startsWith("fav") -> {
+                                            savedSegHint = 0; jump(5, false)
                                         }
-                                        data.posts.any { it.tags.contains(t) } -> {
-                                            postTag = t; jump(2, true)
+                                        raw.startsWith("about") -> aboutOpen = true
+                                        /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
+                                           跟网页端顶栏那条「👣 足迹」一个去处 */
+                                        raw.startsWith("insight") -> footOpen = true
+                                        raw.startsWith("tag/") -> {
+                                            val t = runCatching {
+                                                java.net.URLDecoder.decode(
+                                                    raw.removePrefix("tag/"), "UTF-8"
+                                                )
+                                            }.getOrDefault(raw.removePrefix("tag/"))
+                                            /* 标签页在站点里是「分享 + 文章」一起筛，App 分两页 —— 
+                                               哪边有这个标签就去哪边，两边都有就先去分享 */
+                                            when {
+                                                t.isBlank() -> goTab(1)
+                                                data.feed.any { it.tags.contains(t) } -> {
+                                                    feedTag = t; jump(1, true)
+                                                }
+                                                data.posts.any { it.tags.contains(t) } -> {
+                                                    postTag = t; jump(2, true)
+                                                }
+                                                else -> open(
+                                                    data.site.url.trimEnd('/') + "/#/tag/" + t
+                                                )
+                                            }
                                         }
                                         else -> open(
-                                            data.site.url.trimEnd('/') + "/#/tag/" + t
+                                            if (l.url.startsWith("#")) {
+                                                data.site.url.trimEnd('/') + "/" + l.url
+                                            } else l.url
                                         )
                                     }
-                                }
-                                else -> open(
-                                    if (l.url.startsWith("#")) {
-                                        data.site.url.trimEnd('/') + "/" + l.url
-                                    } else l.url
-                                )
-                            }
-                        },
-                        onSaved = { goTab(5) },
-                        onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
-                        onOpenSearch = { searchOpen = true },
-                        filter = filter,
-                        /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
-                        top = data.top
-                    )
-                    /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
-                    PullRefresh(
-                        refreshing = ui.refreshing,
-                        onRefresh = { vm.refresh() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        HorizontalPager(
-                            state = pager,
-                            modifier = Modifier.fillMaxSize(),
-                            /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
-                            beyondBoundsPageCount = 1,
-                            /* 底栏藏/换序之后 visible 会变短，而 pager 在换页数的那一帧
-                               仍可能拿旧下标来问 key —— 直接下标会 IndexOutOfBounds（就是
-                               「设置里关掉一个标签就闪退」那个崩溃）。getOrElse 兜住 */
-                            key = { i -> visible.getOrElse(i) { -1 } }
-                        ) { page ->
-                            when (visible.getOrElse(page) { -1 }) {
-                                0 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    HomeScreen(
-                                        data = data,
-                                        offline = ui.offline,
-                                        onOpen = open,
-                                        onGoTab = goTab,
-                                        onOpenPost = { openPost = it },
-                                        onOpenAbout = { aboutOpen = true },
-                                        listState = homeList
-                                    )
-                                }
-                                1 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    FeedScreen(
-                                        data, query, feedTag, open,
-                                        onPickTag = { feedTag = it },
-                                        listState = feedList
-                                    )
-                                }
-                                2 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    PostsScreen(data, query, postTag, { openPost = it }, postList)
-                                }
-                                3 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    LinksScreen(
-                                        data, query, navCat, open, prefs.navCollapsed, local,
-                                        navList
-                                    )
-                                }
-                                5 -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    SavedScreen(
-                                        data, local,
-                                        onOpenPost = { openPost = it },
-                                        onOpenUrl = { u -> open(u) },
-                                        segHint = savedSegHint,
-                                        onSegHint = { savedSegHint = null },
-                                        listState = savedList
-                                    )
-                                }
-                                else -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    SettingsScreen(
-                                        prefs, vm, open, local, setList,
-                                        onHelp = { helpOpen = true },
-                                        onLog = { logOpen = true }
-                                    )
+                                },
+                                onSaved = { goTab(5) },
+                                onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
+                                onOpenSearch = { searchOpen = true },
+                                filter = filter,
+                                /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
+                                top = data.top
+                            )
+                            /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
+                            PullRefresh(
+                                refreshing = ui.refreshing,
+                                onRefresh = { vm.refresh() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                HorizontalPager(
+                                    state = pager,
+                                    modifier = Modifier.fillMaxSize(),
+                                    /* 预取相邻一页：滑到一半才开始搭下一页会顿一下 */
+                                    beyondBoundsPageCount = 1,
+                                    /* 底栏藏/换序之后 visible 会变短，而 pager 在换页数的那一帧
+                                       仍可能拿旧下标来问 key —— 直接下标会 IndexOutOfBounds（就是
+                                       「设置里关掉一个标签就闪退」那个崩溃）。getOrElse 兜住 */
+                                    key = { i -> visible.getOrElse(i) { -1 } }
+                                ) { page ->
+                                    when (visible.getOrElse(page) { -1 }) {
+                                        0 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            HomeScreen(
+                                                blocks = prefs.homeBlockList,
+                                                data = data,
+                                                offline = ui.offline,
+                                                onOpen = open,
+                                                onGoTab = goTab,
+                                                onOpenPost = { openPost = it },
+                                                onOpenAbout = { aboutOpen = true },
+                                                listState = homeList
+                                            )
+                                        }
+                                        1 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            FeedScreen(
+                                                data, query, feedTag, open,
+                                                /* 点标签不再原地筛，而是打开「这个标签的全部内容」那一页 */
+                                                onPickTag = { tagOpen = it },
+                                                listState = feedList
+                                            )
+                                        }
+                                        2 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            PostsScreen(data, query, postTag, { openPost = it }, postList)
+                                        }
+                                        3 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            LinksScreen(
+                                                data, query, navCat, open, prefs.navCollapsed, local,
+                                                navList
+                                            )
+                                        }
+                                        5 -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            SavedScreen(
+                                                data, local,
+                                                onOpenPost = { openPost = it },
+                                                onOpenUrl = { u -> open(u) },
+                                                segHint = savedSegHint,
+                                                onSegHint = { savedSegHint = null },
+                                                listState = savedList
+                                            )
+                                        }
+                                        else -> Box(Modifier.fillMaxSize().enterRise()) {
+                                            SettingsScreen(
+                                                prefs, vm, open, local, setList,
+                                                onHelp = { helpOpen = true },
+                                                onLog = { logOpen = true }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -548,84 +581,84 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                 }
             }
         }
-    }
 
-    /* 全站搜索：整屏铺开，键盘起来也够放结果 */
-    if (searchOpen && data != null) {
-        SearchOverlay(
-            data = data,
-            query = query,
-            onQuery = { query = it },
-            onClose = {
-                /* 取消时把关键词一起清掉：否则退回去的列表还被这个词筛着，
-                   页面上又没有清除入口，只剩一个「找到 0 个」的空态看着像丢数据 */
-                query = ""
-                searchOpen = false
-                focus.clearFocus()
-                keyboard?.hide()
-            },
-            onOpenUrl = { u -> query = ""; searchOpen = false; open(u) },
-            onOpenPost = { p -> searchOpen = false; openPost = p },
-            onCategory = { c ->
-                /* 从搜索里点分类：要的是「这一类的全部」，关键词清掉 —— 两个字叠着筛只剩几条，反而像没数据 */
-                query = ""
-                navCat = c.id
-                searchOpen = false
-                jump(3, true)
-            },
-            onTab = { id ->
-                /* 「看全部 N 个」那串数字是按全站算的，跳过去必须把该页自己的分类/标签筛清掉 ——
-                   两个筛叠着只剩几条，跟刚才看到的 N 对不上，看着像丢了数据 */
-                when (id) {
-                    1 -> feedTag = ""
-                    2 -> postTag = ""
-                    3 -> navCat = ""
-                }
-                searchOpen = false
-                jump(id, true)
-            }
-        )
-    }
-
-    /* 底部筛选面板：分类 / 标签，三处共用 */
-    if (picker != PICK_NONE && data != null) {
-        val (title, allLabel, items, current, set) = when (picker) {
-            PICK_CAT -> Quint(
-                "全部分类", "全部分类",
-                /* emoji 跟「分类图标」那个开关走 —— 网页端面板里关掉就是纯名字，
-                   App 这儿以前无条件带 emoji，两边对不上 */
-                data.cats.map {
-                    PickItem(it.id, if (data.nav.catIcon) it.icon else "", it.name, it.links.size)
+        /* 全站搜索：整屏铺开，键盘起来也够放结果 */
+        if (searchOpen && data != null) {
+            SearchOverlay(
+                data = data,
+                query = query,
+                onQuery = { query = it },
+                onClose = {
+                    /* 取消时把关键词一起清掉：否则退回去的列表还被这个词筛着，
+                       页面上又没有清除入口，只剩一个「找到 0 个」的空态看着像丢数据 */
+                    query = ""
+                    searchOpen = false
+                    focus.clearFocus()
+                    keyboard?.hide()
                 },
-                navCat, { v: String -> navCat = v }
-            )
-            PICK_FEED_TAG -> Quint(
-                "按标签筛选", "全部标签",
-                data.feed.flatMap { it.tags }.groupingBy { it }.eachCount()
-                    .entries.sortedByDescending { it.value }
-                    .map { PickItem(it.key, "", it.key, it.value) },
-                feedTag, { v: String -> feedTag = v }
-            )
-            else -> Quint(
-                "按标签筛选", "全部标签",
-                data.posts.flatMap { it.tags }.groupingBy { it }.eachCount()
-                    .entries.sortedByDescending { it.value }
-                    .map { PickItem(it.key, "", it.key, it.value) },
-                postTag, { v: String -> postTag = v }
+                onOpenUrl = { u -> query = ""; searchOpen = false; open(u) },
+                onOpenPost = { p -> searchOpen = false; openPost = p },
+                onCategory = { c ->
+                    /* 从搜索里点分类：要的是「这一类的全部」，关键词清掉 —— 两个字叠着筛只剩几条，反而像没数据 */
+                    query = ""
+                    navCat = c.id
+                    searchOpen = false
+                    jump(3, true)
+                },
+                onTab = { id ->
+                    /* 「看全部 N 个」那串数字是按全站算的，跳过去必须把该页自己的分类/标签筛清掉 ——
+                       两个筛叠着只剩几条，跟刚才看到的 N 对不上，看着像丢了数据 */
+                    when (id) {
+                        1 -> feedTag = ""
+                        2 -> postTag = ""
+                        3 -> navCat = ""
+                    }
+                    searchOpen = false
+                    jump(id, true)
+                }
             )
         }
-        PickerSheet(
-            title = title,
-            allLabel = allLabel,
-            items = items,
-            current = current,
-            /* 选完就把面板收掉 —— 站点那边点分类 / 标签也是「选中即关」，
-               App 以前只改了筛选、面板还支在那儿，得再点一次「完成」才看得到结果 */
-            onPick = { v -> set(v); picker = PICK_NONE },
-            onClose = { picker = PICK_NONE },
-            /* 分类后面的站点数跟站点后台那个开关走；标签数照旧一直显示 */
-            showCount = if (picker == PICK_CAT) data.nav.count else true
-        )
+
+        /* 底部筛选面板：分类 / 标签，三处共用 */
+        if (picker != PICK_NONE && data != null) {
+            val (title, allLabel, items, current, set) = when (picker) {
+                PICK_CAT -> Quint(
+                    "全部分类", "全部分类",
+                    /* emoji 跟「分类图标」那个开关走 —— 网页端面板里关掉就是纯名字，
+                       App 这儿以前无条件带 emoji，两边对不上 */
+                    data.cats.map {
+                        PickItem(it.id, if (data.nav.catIcon) it.icon else "", it.name, it.links.size)
+                    },
+                    navCat, { v: String -> navCat = v }
+                )
+                PICK_FEED_TAG -> Quint(
+                    "按标签筛选", "全部标签",
+                    data.feed.flatMap { it.tags }.groupingBy { it }.eachCount()
+                        .entries.sortedByDescending { it.value }
+                        .map { PickItem(it.key, "", it.key, it.value) },
+                    feedTag, { v: String -> feedTag = v }
+                )
+                else -> Quint(
+                    "按标签筛选", "全部标签",
+                    data.posts.flatMap { it.tags }.groupingBy { it }.eachCount()
+                        .entries.sortedByDescending { it.value }
+                        .map { PickItem(it.key, "", it.key, it.value) },
+                    postTag, { v: String -> postTag = v }
+                )
+            }
+            PickerSheet(
+                title = title,
+                allLabel = allLabel,
+                items = items,
+                current = current,
+                /* 选完就把面板收掉 —— 站点那边点分类 / 标签也是「选中即关」，
+                   App 以前只改了筛选、面板还支在那儿，得再点一次「完成」才看得到结果 */
+                onPick = { v -> set(v); picker = PICK_NONE },
+                onClose = { picker = PICK_NONE },
+                /* 分类后面的站点数跟站点后台那个开关走；标签数照旧一直显示 */
+                showCount = if (picker == PICK_CAT) data.nav.count else true
+            )
+        }
     }
 
     /* 发现新版就弹一次；点「稍后」会把 latest 清掉，这次打开不再打扰（下次启动还会问） */

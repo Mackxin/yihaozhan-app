@@ -39,7 +39,10 @@ data class AppPayload(
     val changelog: List<VersionLog> = emptyList(),
     /* 设置 → 使用手册：Markdown 正文（站点仓库 data/help.md）。
        空 = 没有手册，入口不画 */
-    val help: String = ""
+    val help: String = "",
+    /* 站点的阅读偏好（后台「阅读体验」）：字号 / 行距 / 字体。
+       只当**默认值**用 —— 用户在自己手机上改过就以本机设置为准 */
+    val read: ReadCfg? = null
 ) {
     val isEmpty: Boolean get() = feed.isEmpty() && posts.isEmpty() && cats.isEmpty()
 }
@@ -119,7 +122,27 @@ data class HomeCfg(
     val sponsorTitle: String = "",
     val sponsorDesc: String = "",
     val sponsorNote: String = "",
-    val sponsorLink: String = ""
+    val sponsorLink: String = "",
+    /* 收款码（后台「首页内容 → 赞助 → 收款码」，最多几张）。
+       老 json 没这段 → 空列表，赞助卡只显示文案，跟以前一样 */
+    val sponsorCodes: List<SponsorCode> = emptyList()
+)
+
+/** 站点的阅读偏好（网页端 `read` 那份配置的只读副本） */
+@Serializable
+data class ReadCfg(
+    val size: Int = 16,          // 正文字号 px（14–20）
+    val line: Float = 1.95f,     // 行高倍率（1.6–2.2）
+    val font: String = "sans",   // sans | serif
+    val toc: Boolean = true
+)
+
+/** 一张收款码：src 可能是 data URL（后台直接上传的图），也可能是站点相对路径 */
+@Serializable
+data class SponsorCode(
+    val src: String = "",
+    val label: String = "",
+    val link: String = ""
 )
 
 /** 关于这一页：正文是 Markdown，App 用自己那个渲染器画 */

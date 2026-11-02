@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -148,12 +149,45 @@ fun SettingsScreen(
                     Segmented(options = listOf("小", "标准", "大"), selected = prefs.fontSize) {
                         prefs.updateFontSize(it)
                     }
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "行距", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            prefs.lineName, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Segmented(options = listOf("紧凑", "标准", "宽松"), selected = prefs.readLine) {
+                        prefs.updateReadLine(it)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "正文字体", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            prefs.fontName, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Segmented(
+                        options = listOf("无衬线", "衬线"),
+                        selected = if (prefs.readFont == "serif") 1 else 0
+                    ) { i -> prefs.updateReadFont(if (i == 1) "serif" else "sans") }
                     Spacer(Modifier.height(12.dp))
-                    /* 现成的一句话当预览，不用跳去文章里试 */
+                    /* 现成的一句话当预览：字号、行距、字体改了这里立刻能看出来 */
+                    val pSize = (14 * prefs.fontScale).sp
                     Text(
                         "文章正文会长这样：壹号为栈，随处可归。",
-                        fontSize = (14 * prefs.fontScale).sp,
-                        lineHeight = (24 * prefs.fontScale).sp,
+                        fontSize = pSize,
+                        lineHeight = (14 * prefs.fontScale * prefs.lineHeightFactor).sp,
+                        fontFamily = if (prefs.readFont == "serif") FontFamily.Serif else FontFamily.SansSerif,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(12.dp))
@@ -164,6 +198,93 @@ fun SettingsScreen(
                         desc = "每篇各记各的，下次点进去接着读（关掉就每次都从开头）",
                         checked = prefs.rememberPos
                     ) { prefs.updateRememberPos(it) }
+                }
+            }
+
+            /* ---------------- 列表 ---------------- */
+            item { GroupTitle("列表") }
+            item {
+                SettingCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "卡片密度", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            prefs.densityName, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "紧凑会把导航和分享的卡片压薄一点，一屏多看好几条。",
+                        fontSize = 11.5.sp, lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Segmented(options = listOf("紧凑", "标准"), selected = prefs.cardDensity) {
+                        prefs.updateCardDensity(it)
+                    }
+                }
+            }
+
+            /* ---------------- 首页板块 ---------------- */
+            item { GroupTitle("首页板块") }
+            item {
+                SettingCard {
+                    Text(
+                        "首页从上到下按这个顺序排，关掉的就整块不出现。",
+                        fontSize = 11.5.sp, lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    val keys = prefs.homeBlockList
+                    /* 全部板块都列出来（关掉的也在），开关状态就看它在不在列表里 */
+                    Prefs.HOME_BLOCKS.forEach { (key, label) ->
+                        val shown = keys.contains(key)
+                        val idx = keys.indexOf(key)
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    label, fontSize = 13.5.sp,
+                                    fontWeight = if (shown) FontWeight.Medium else FontWeight.Normal,
+                                    color = if (shown) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            /* 上下挪顺序：只对显示中的项有意义 */
+                            if (shown) {
+                                Text(
+                                    "↑", fontSize = 15.sp,
+                                    color = if (idx > 0) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = idx > 0) { prefs.moveHomeBlock(key, -1) }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                                Text(
+                                    "↓", fontSize = 15.sp,
+                                    color = if (idx in 0 until keys.size - 1)
+                                        MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = idx in 0 until keys.size - 1) {
+                                            prefs.moveHomeBlock(key, 1)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                            Switch(
+                                checked = shown,
+                                onCheckedChange = { prefs.toggleHomeBlock(key) }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -378,6 +499,24 @@ fun SettingsScreen(
                                 Toast.makeText(ctx, "已清空阅读记录", Toast.LENGTH_SHORT).show()
                             },
                             enabled = local.posCount > 0
+                        ) { Text("清除", fontSize = 13.sp) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("最常去 / 每日计数", fontSize = 13.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${local.visits.size} 个站点有次数 · ${local.daily.size} 天有记录",
+                                fontSize = 11.sp, color = LocalXyPal.current.mute
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                local.clearVisits()
+                                local.clearDaily()
+                                Toast.makeText(ctx, "足迹统计已清空", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = local.visits.isNotEmpty() || local.daily.isNotEmpty()
                         ) { Text("清除", fontSize = 13.sp) }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
