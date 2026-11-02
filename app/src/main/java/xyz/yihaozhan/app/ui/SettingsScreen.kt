@@ -71,8 +71,11 @@ fun SettingsScreen(
     vm: MainVm,
     onOpen: (String) -> Unit,
     local: Local,
-    /* 滚动状态由外层持有：顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
-    listState: LazyListState = rememberLazyListState()
+    /* 顶栏那颗「壹号栈」在这一页也要能做「到底 / 回顶」 */
+    listState: LazyListState = rememberLazyListState(),
+    /* 两份说明书：使用手册 / 版本更新。都是整屏内置页，由 MainActivity 管开关 */
+    onHelp: () -> Unit = {},
+    onLog: () -> Unit = {}
 ) {
     val ui = vm.ui
     val data = ui.data
@@ -393,6 +396,30 @@ fun SettingsScreen(
                             },
                             enabled = local.recents.isNotEmpty()
                         ) { Text("清除", fontSize = 13.sp) }
+                    }
+                }
+            }
+
+            /* ---------------- 帮助（使用手册 / 版本更新） ----------------
+               两份都是整屏内置页，内容来自站点仓库的 data/help.md 与 data/changelog.json，
+               所以这里不写正文，只放入口 —— 改文案不用发版。
+               数据里没有就直接不画这一组，不留一个点进去空白的按钮。 */
+            val hasHelp = !data?.help.isNullOrBlank()
+            val logs = data?.changelog.orEmpty()
+            if (hasHelp || logs.isNotEmpty()) {
+                item { GroupTitle("帮助") }
+                item {
+                    SettingCard {
+                        if (hasHelp) {
+                            InfoRow("使用手册", "怎么用 →", onClick = onHelp)
+                        }
+                        if (logs.isNotEmpty()) {
+                            InfoRow(
+                                "版本更新",
+                                "共 " + logs.size + " 版 · 最新 " + (logs.firstOrNull()?.version ?: ""),
+                                onClick = onLog
+                            )
+                        }
                     }
                 }
             }

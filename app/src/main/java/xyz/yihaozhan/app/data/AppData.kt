@@ -33,10 +33,28 @@ data class AppPayload(
     /* 首页要用的几块（今日精选 / 赞助 / 建站日期）。null = 老 json */
     val home: HomeCfg? = null,
     /* 关于这一页。null = 老 json */
-    val about: AboutCfg? = null
+    val about: AboutCfg? = null,
+    /* 设置 → 版本更新：每个版本改了什么（站点仓库 data/changelog.json 烘过来的）。
+       老 json 没这段 → 空列表，设置里那一项自动隐藏，不会点进去一片空白 */
+    val changelog: List<VersionLog> = emptyList(),
+    /* 设置 → 使用手册：Markdown 正文（站点仓库 data/help.md）。
+       空 = 没有手册，入口不画 */
+    val help: String = ""
 ) {
     val isEmpty: Boolean get() = feed.isEmpty() && posts.isEmpty() && cats.isEmpty()
 }
+
+/**
+ * 一条版本记录。`version` 是 2.6.4 这种，`code` 是 versionCode，
+ * `items` 就是那一版改动的几条要点（纯文本，App 端加个圆点前缀就是列表）。
+ */
+@Serializable
+data class VersionLog(
+    val code: Int = 0,
+    val version: String = "",
+    val date: String = "",
+    val items: List<String> = emptyList()
+)
 
 /** 导航页卡片上显示什么：左侧彩色图标 / 名字下那行介绍 / 分类名前的 emoji */
 @Serializable
@@ -169,7 +187,9 @@ data class LinkItem(
     val name: String = "",
     val url: String = "",
     val icon: String = "",
-    val desc: String = ""
+    val desc: String = "",
+    /* 站点后台给单个站点设的「置顶」：网页端 sortPinned() 用，App 排序照样跟 */
+    val pin: Boolean = false
 )
 
 @Serializable

@@ -5,21 +5,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,7 +46,10 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,7 +57,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -63,6 +73,7 @@ import androidx.compose.ui.window.DialogProperties
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.Cat
 import xyz.yihaozhan.app.data.Post
+import xyz.yihaozhan.app.data.Py
 
 /* ============================ 全站搜索 ============================ */
 
@@ -369,7 +380,9 @@ private fun buildGroups(
         }
     )
 
-    val cats = data.cats.filter { has(it.name) || has(it.desc) }
+    /* 分类 / 站点两组走 Py.hit：除了普通包含，还能吃拼音首字母 ——
+       跟导航页那个搜索框一个口径，否则搜「zh」这里 0 条、点进去一堆，很割裂 */
+    val cats = data.cats.filter { Py.hit(n, it.name, it.desc) }
     add(
         "分类", "个分类", cats.size, 3,
         cats.take(4).map { c ->
@@ -380,7 +393,7 @@ private fun buildGroups(
     )
 
     val sites = data.cats.flatMap { c -> c.links.map { c to it } }
-        .filter { (c, l) -> has(l.name) || has(l.desc) || has(l.url) || has(c.name) }
+        .filter { (c, l) -> Py.hit(n, l.name, l.desc + " " + l.url + " " + c.name) }
     add(
         "站点", "个站点", sites.size, 3,
         sites.take(4).map { (c, l) ->
@@ -441,9 +454,19 @@ fun PickerSheet(
     showCount: Boolean = true
 ) {
     val pal = LocalXyPal.current
+    /* 分类有五十来个，滚动找一页太慢 —— 加个筛框（网页端分类 ≥9 时也是这么干的）。
+       打开面板就是一次新的组合，所以关键词不用手动清，关掉自动没了。 */
+    var fq by remember { mutableStateOf("") }
+    val showFilter = items.size >= 9
+    val shown = if (fq.isBlank()) items else items.filter { it.label.contains(fq.trim(), true) }
     Dialog(
         onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            /* 让弹窗自己算系统栏 / 键盘的占位。不关这个开关，软键盘一弹，
+               整个抽屉就被压在键盘底下 —— 一边打字一边看不到筛选结果（2.6.5 修） */
+            decorFitsSystemWindows = false
+        )
     ) {
         Box(Modifier.fillMaxSize()) {
             /* 点空白处关掉 */
@@ -456,57 +479,129 @@ fun PickerSheet(
                         indication = null
                     ) { onClose() }
             )
-            Column(
+            /* 抽屉装在带「键盘 + 手势条」占位的一层里：弹键盘时正好浮在键盘上方，
+               收起键盘时又贴着手势条，不会多出一截空白。高度也跟着这层算，
+               免得弹键盘后抽屉顶到屏幕外面、把标题和筛框挤没了。 */
+            BoxWithConstraints(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-                    .background(pal.bgSoft)
-                    .navigationBarsPadding()
-                    .enterPop()
-                    .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 18.dp)
+                    .fillMaxSize()
+                    .windowInsetsPadding(
+                        WindowInsets.navigationBars
+                            .union(WindowInsets.ime)
+                            .only(WindowInsetsSides.Bottom)
+                    )
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        title,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = pal.text,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        "完成",
-                        fontSize = 13.sp,
-                        color = pal.inkA1,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onClose() }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                /* 钉死三列：五十来个分类一行三个 → 十七行，一屏基本能看全。
-                   格子高度压到 34dp、间距 6dp，小屏才不至于非滚不可；
-                   真装不下就滚（面板本身不撑破屏幕）。 */
-                val maxSheetH = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = maxSheetH),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                val maxSheetH = maxHeight * 0.84f
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .heightIn(max = maxSheetH)
+                        .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                        .background(pal.bgSoft)
+                        .enterPop()
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 18.dp)
                 ) {
-                    item(key = "__all__") {
-                        PickCell(
-                            label = allLabel, emoji = "", active = current.isBlank(),
-                            showCount = false, count = -1
-                        ) { onPick("") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            title,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = pal.text,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "完成",
+                            fontSize = 13.sp,
+                            color = pal.inkA1,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onClose() }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
                     }
-                    items(items.size, key = { items[it].id }) { i ->
-                        val p = items[i]
-                        PickCell(
-                            label = p.label, emoji = p.emoji, active = current == p.id,
-                            showCount = showCount, count = p.count
-                        ) { onPick(p.id) }
+                    Spacer(Modifier.height(12.dp))
+                    if (showFilter) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(pal.glass)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.Search, null,
+                                tint = pal.mute, modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Box(Modifier.weight(1f)) {
+                                if (fq.isEmpty()) {
+                                    Text(
+                                        "筛分类…", fontSize = 12.5.sp, color = pal.mute,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = fq,
+                                    onValueChange = { fq = it },
+                                    singleLine = true,
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 12.5.sp, color = pal.text
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (fq.isNotEmpty()) {
+                                Text(
+                                    "✕",
+                                    fontSize = 12.sp,
+                                    color = pal.mute,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(99.dp))
+                                        .clickable { fq = "" }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    /* 钉死三列：五十来个分类一行三个 → 十七行，一屏基本能看全。
+                       格子高度压到 34dp、间距 6dp，小屏才不至于非滚不可；
+                       真装不下就滚（面板本身不撑破屏幕）。 */
+                    if (shown.isEmpty()) {
+                        Text(
+                            "没有叫「" + fq.trim() + "」的分类",
+                            fontSize = 12.5.sp,
+                            color = pal.mute,
+                            modifier = Modifier.padding(vertical = 18.dp)
+                        )
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            /* 正在筛的时候不显示「全部」那一格 —— 它是「取消筛选」的意思，
+                               跟筛框里的字会打架 */
+                            if (fq.isBlank()) {
+                                item(key = "__all__") {
+                                    PickCell(
+                                        label = allLabel, emoji = "", active = current.isBlank(),
+                                        showCount = false, count = -1
+                                    ) { onPick("") }
+                                }
+                            }
+                            items(shown.size, key = { shown[it].id }) { i ->
+                                val p = shown[i]
+                                PickCell(
+                                    label = p.label, emoji = p.emoji, active = current == p.id,
+                                    showCount = showCount, count = p.count
+                                ) { onPick(p.id) }
+                            }
+                        }
                     }
                 }
             }

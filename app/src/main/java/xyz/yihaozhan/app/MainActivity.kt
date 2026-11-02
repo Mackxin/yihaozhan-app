@@ -75,8 +75,10 @@ import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
+import xyz.yihaozhan.app.ui.ChangelogScreen
 import xyz.yihaozhan.app.ui.FeedScreen
 import xyz.yihaozhan.app.ui.FootprintScreen
+import xyz.yihaozhan.app.ui.HelpScreen
 import xyz.yihaozhan.app.ui.HomeScreen
 import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
@@ -169,6 +171,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     /* 足迹（站点 #/insight）：内置页，从顶栏自定义入口那条「👣 足迹」进。
        2.6 起不再占底栏页签 —— 底栏只放四个主页面 + 收藏 + 设置。 */
     var footOpen by rememberSaveable { mutableStateOf(false) }
+    /* 设置里那两份说明书（2.6.5 加的）：都是整屏内置页，跟灵感随记/关于/足迹一个待遇 ——
+       进去之后底栏还在、返回键只退这一页。 */
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
+    var logOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 每个页签各有一条滚动状态，统统提到这儿持有。
        为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：
@@ -250,6 +256,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         ideaOpen = false
         aboutOpen = false
         footOpen = false
+        helpOpen = false
+        logOpen = false
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -280,12 +288,17 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     /* 返回键：先退网页预览，再退阅读页 / 内置页，退完才退出 App。
        2.6 修：灵感随记、足迹、关于这三个内置页以前没进这个判断，
        按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
-    BackHandler(enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen) {
+    BackHandler(
+        enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
+            helpOpen || logOpen
+    ) {
         when {
             webUrl != null -> webUrl = null
             ideaOpen -> ideaOpen = false
             aboutOpen -> aboutOpen = false
             footOpen -> footOpen = false
+            helpOpen -> helpOpen = false
+            logOpen -> logOpen = false
             else -> openPost = null
         }
     }
@@ -348,6 +361,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                 }
                 footOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                     FootprintScreen(data, local, open) { footOpen = false }
+                }
+                helpOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                    HelpScreen(data) { helpOpen = false }
+                }
+                logOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                    ChangelogScreen(data) { logOpen = false }
                 }
                 openPost != null -> {
                     /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
@@ -517,7 +536,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                     )
                                 }
                                 else -> Box(Modifier.fillMaxSize().enterRise()) {
-                                    SettingsScreen(prefs, vm, open, local, setList)
+                                    SettingsScreen(
+                                        prefs, vm, open, local, setList,
+                                        onHelp = { helpOpen = true },
+                                        onLog = { logOpen = true }
+                                    )
                                 }
                             }
                         }
@@ -534,11 +557,14 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             query = query,
             onQuery = { query = it },
             onClose = {
+                /* 取消时把关键词一起清掉：否则退回去的列表还被这个词筛着，
+                   页面上又没有清除入口，只剩一个「找到 0 个」的空态看着像丢数据 */
+                query = ""
                 searchOpen = false
                 focus.clearFocus()
                 keyboard?.hide()
             },
-            onOpenUrl = { u -> searchOpen = false; open(u) },
+            onOpenUrl = { u -> query = ""; searchOpen = false; open(u) },
             onOpenPost = { p -> searchOpen = false; openPost = p },
             onCategory = { c ->
                 /* 从搜索里点分类：要的是「这一类的全部」，关键词清掉 —— 两个字叠着筛只剩几条，反而像没数据 */
@@ -593,7 +619,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             allLabel = allLabel,
             items = items,
             current = current,
-            onPick = set,
+            /* 选完就把面板收掉 —— 站点那边点分类 / 标签也是「选中即关」，
+               App 以前只改了筛选、面板还支在那儿，得再点一次「完成」才看得到结果 */
+            onPick = { v -> set(v); picker = PICK_NONE },
             onClose = { picker = PICK_NONE },
             /* 分类后面的站点数跟站点后台那个开关走；标签数照旧一直显示 */
             showCount = if (picker == PICK_CAT) data.nav.count else true

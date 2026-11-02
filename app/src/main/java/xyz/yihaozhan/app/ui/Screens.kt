@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.Local
+import xyz.yihaozhan.app.data.Py
 import xyz.yihaozhan.app.data.FeedItem
 import xyz.yihaozhan.app.data.LinkItem
 import xyz.yihaozhan.app.data.Post
@@ -791,16 +792,14 @@ fun LinksScreen(
     var menuFor by remember { mutableStateOf<LinkItem?>(null) }
 
     /* 搜索时只留有命中的分类，组内也只留命中的链接 —— 搜索结果仍然按分类分组。
-       分类名也算命中：站点那边的 hay 是「站名 + 描述 + 分类名 + 网址」，搜 mac 要能带出整个 MAC 类，
+       命中判定走 `Py.hit`：普通包含 + 拼音首字母（zh→知乎、txsp→腾讯视频）+ 骨架（gh→GitHub），
+       跟网页端 matchLink 一个口径。分类名也塞进 extra —— 搜 mac 要能带出整个 MAC 类，
        这样顶栏搜索里「看全部 N 个站点」的 N 和这里数出来的才一样 */
     val groups = remember(cats, keyword, onlyFav, favSet) {
         cats.mapNotNull { c ->
-            val catHit = keyword.isNotEmpty() && c.name.lowercase().contains(keyword)
+            val catHit = keyword.isNotEmpty() && Py.hit(keyword, c.name)
             val hits = if (keyword.isEmpty()) c.links else c.links.filter { l ->
-                catHit ||
-                    l.name.lowercase().contains(keyword) ||
-                    l.desc.lowercase().contains(keyword) ||
-                    l.url.lowercase().contains(keyword)
+                catHit || Py.hit(keyword, l.name, l.desc + " " + l.url + " " + c.name)
             }
             val shown = if (onlyFav) hits.filter { it.url in favSet } else hits
             if (shown.isEmpty()) null else c to shown
