@@ -1,5 +1,6 @@
 package xyz.yihaozhan.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +41,8 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.CloudOff
@@ -455,6 +459,23 @@ fun PostDetailScreen(
     val scrolled = listState.firstVisibleItemIndex > 2
     val shareUrl = "https://mackxin.github.io/xingyu/#/post/" + post.id
 
+    /* ---------------- 朗读（系统 TTS） ----------------
+       整篇的纯文字只算一次：标题念一句，然后按块接下去。
+       换文章（pager 滑过去）时把上一段念的东西停掉，不然声音会跟着人跑到别的文章里。 */
+    val spk = rememberSpeaker()
+    val spoken = remember(post.id, blocks) {
+        buildString {
+            append(post.title).append("。\n")
+            blocks.forEach { b -> append(mdBlockText(b)).append("\n") }
+        }
+    }
+    LaunchedEffect(post.id) { spk.stop() }
+
+    /* 长按了哪一段：null = 没弹动作条。下标而不是块本身，切文章时自然失效 */
+    var picked by remember(post.id) { mutableStateOf<Int?>(null) }
+    /* 动作条开着时，返回键只该收掉它，不该退出整篇 —— 所以这儿要有一个更靠内层的 BackHandler */
+    BackHandler(enabled = picked != null) { picked = null }
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             /* 顶栏：返回 / 文章名 / 收藏 / 稍后读 / 分享 */
@@ -474,6 +495,13 @@ fun PostDetailScreen(
                     color = pal.dim,
                     modifier = Modifier.weight(1f).padding(horizontal = 2.dp)
                 )
+                BarIcon(
+                    icon = if (spk.speaking) Icons.Rounded.StopCircle else Icons.Rounded.VolumeUp,
+                    desc = if (spk.speaking) "停止朗读" else "朗读这篇",
+                    tint = if (spk.speaking) pal.inkA3 else pal.dim
+                ) {
+                    if (spk.speaking) spk.stop() else spk.speak(spoken)
+                }
                 BarIcon(
                     icon = if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                     desc = if (fav) "取消收藏" else "收藏",
@@ -530,7 +558,17 @@ fun PostDetailScreen(
                     }
                 }
                 itemsIndexed(blocks) { i, b ->
-                    SelectionContainer {
+                    /* 长按一段 → 底部弹动作条（存为摘录 / 复制 / 朗读这段）。
+                       这里不再套 SelectionContainer：它自己也吃长按（用来起拖拽选字），
+                       两个手势抢同一个事件只会互相打架 —— 而且手机上跨段拖选本来也选不全。
+                       换成「长按 = 整段摘」更合手，真要逐字选还能在「在浏览器里看这篇」里选。 */
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .pointerInput(b) {
+                                detectTapGestures(onLongPress = { picked = i })
+                            }
+                    ) {
                         MdBlockView(b, fontScale, lineFactor, serif)
                     }
                 }
@@ -611,14 +649,119 @@ fun PostDetailScreen(
                 onDismiss = { showToc = false }
             )
         }
+
+        /* 长按某一段之后的动作条。三件事：存为摘录、复制这一段、朗读这一段 */
+        val pi = picked
+        val blk = if (pi != null) blocks.getOrNull(pi) else null
+        if (blk != null) {
+            val txt = remember(blk) { mdBlockText(blk) }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { picked = null }
+                    .enterFade(180),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        /* 动作条贴着屏幕底：不加这一层，三颗按钮会被系统导航条压掉半截 */
+                        .navigationBarsPadding()
+                        .padding(14.dp)
+                        .clip(RoundedCornerShape(pal.rLg.dp))
+                        .background(pal.bgSoft)
+                        /* 空回调把点击吃掉，不然点卡片本身也会关掉它 */
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Text("这一段", fontSize = 12.sp, color = pal.mute)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        txt,
+                        fontSize = 14.sp,
+                        lineHeight = 23.sp,
+                        color = pal.text,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SheetAction("✂️ 存为摘录", Modifier.weight(1f), strong = true) {
+                            picked = null
+                            if (local == null) {
+                                Toast.makeText(ctx, "先打开一篇看看", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val added = local.addExtract(post.id, post.title, txt)
+                                Toast.makeText(
+                                    ctx,
+                                    if (added) "已存进摘录本" else "这一段已经摘过了",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                        SheetAction("复制", Modifier.weight(1f)) {
+                            picked = null
+                            copyText(ctx, txt)
+                            Toast.makeText(ctx, "已复制", Toast.LENGTH_SHORT).show()
+                        }
+                        SheetAction(
+                            if (spk.speaking) "停止朗读" else "朗读",
+                            Modifier.weight(1f)
+                        ) {
+                            picked = null
+                            if (spk.speaking) spk.stop() else spk.speak(txt)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 动作条上的一颗按钮：三颗等宽，主操作（存摘录）给玻璃底提一档 */
+@Composable
+private fun SheetAction(
+    text: String,
+    modifier: Modifier = Modifier,
+    strong: Boolean = false,
+    onClick: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    Box(
+        modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (strong) pal.glassHi else pal.glass)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            fontSize = 13.sp,
+            fontWeight = if (strong) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (strong) pal.inkA1 else pal.dim,
+            maxLines = 1
+        )
     }
 }
 
 /**
  * 阅读页底部那一小张「上一篇 / 下一篇」卡：上面一行小标签说方向，
  * 下面一行是标题（两行封顶）。没有那一篇就整块不画，不留空壳。
- */
-@Composable
+ */@Composable
 private fun PostNavCard(
     label: String,
     post: Post?,

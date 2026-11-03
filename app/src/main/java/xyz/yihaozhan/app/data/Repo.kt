@@ -39,8 +39,19 @@ object Repo {
         runCatching { XYJson.decodeFromString<AppPayload>(f.readText()) }.getOrNull()
     }
 
-    suspend fun lastSyncAt(ctx: Context): Long = withContext(Dispatchers.IO) {
+    /**
+     * 同步版读缓存 —— 给桌面小组件用。
+     *
+     * 小组件是 `BroadcastReceiver`，系统给的执行时间很紧（约 10 秒，主线程），
+     * 没有地方挂协程；而读一个本地文件 + 解析 300KB json 也就十几毫秒，同步读完更省事。
+     */
+    fun loadCacheSync(ctx: Context): AppPayload? = runCatching {
         val f = file(ctx)
+        if (!f.exists() || f.length() < 32) return null
+        XYJson.decodeFromString<AppPayload>(f.readText())
+    }.getOrNull()
+
+    suspend fun lastSyncAt(ctx: Context): Long = withContext(Dispatchers.IO) {        val f = file(ctx)
         if (f.exists()) f.lastModified() else 0L
     }
 

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  长按桌面图标弹出的快捷方式（Android 7.1+）。
+
+  走的是「同一个 Activity + intent 里塞一个 page」：值在 MainActivity.takeIntent() 里读，
+  只认 search / idea / later 三个，认不出来就正常启动。
+  targetPackage / targetClass 得写死（这里是资源文件，${applicationId} 那种占位符不会展开）。
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="search"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_search"
+        android:shortcutShortLabel="@string/sc_search"
+        android:shortcutLongLabel="@string/sc_search">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="xyz.yihaozhan.app"
+            android:targetClass="xyz.yihaozhan.app.MainActivity">
+            <extra android:name="page" android:value="search" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="idea"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_idea"
+        android:shortcutShortLabel="@string/sc_idea"
+        android:shortcutLongLabel="@string/sc_idea">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="xyz.yihaozhan.app"
+            android:targetClass="xyz.yihaozhan.app.MainActivity">
+            <extra android:name="page" android:value="idea" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="later"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_later"
+        android:shortcutShortLabel="@string/sc_later"
+        android:shortcutLongLabel="@string/sc_later">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="xyz.yihaozhan.app"
+            android:targetClass="xyz.yihaozhan.app.MainActivity">
+            <extra android:name="page" android:value="later" />
+        </intent>
+    </shortcut>
+
+</shortcuts>

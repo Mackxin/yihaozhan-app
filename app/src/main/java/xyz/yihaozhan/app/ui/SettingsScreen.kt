@@ -1,6 +1,12 @@
 package xyz.yihaozhan.app.ui
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -76,7 +82,11 @@ fun SettingsScreen(
     listState: LazyListState = rememberLazyListState(),
     /* 两份说明书：使用手册 / 版本更新。都是整屏内置页，由 MainActivity 管开关 */
     onHelp: () -> Unit = {},
-    onLog: () -> Unit = {}
+    onLog: () -> Unit = {},
+    /* 摘录本（2.6.7）：阅读页长按存下来的段落 */
+    onExtracts: () -> Unit = {},
+    /* 站点巡检（2.6.7）：抽查站点还通不通 */
+    onCheck: () -> Unit = {}
 ) {
     val ui = vm.ui
     val data = ui.data
@@ -86,6 +96,51 @@ fun SettingsScreen(
         runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
         }.getOrNull() ?: "1.2"
+    }
+
+    /* ---- 备份 / 恢复：走系统文件选择器（SAF），一个存储权限都不用申请 ----
+       导出自己挑存哪（下载目录、网盘都行），导入自己挑那份 JSON。 */
+    val scope = rememberCoroutineScope()
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val json = withContext(Dispatchers.IO) { local.exportAllJson(prefs) }
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openOutputStream(uri)!!.use { it.write(json.toByteArray()) }
+                }.isSuccess
+            }
+            Toast.makeText(
+                ctx,
+                if (ok) "备份已导出（" + (json.length / 1024) + " KB）" else "导出失败，换个位置再试试",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+                }.getOrNull()
+            }
+            val n = if (text == null) -1
+            else withContext(Dispatchers.IO) {
+                runCatching { local.importAllJson(text, prefs) }.getOrDefault(-1)
+            }
+            Toast.makeText(
+                ctx,
+                when {
+                    n < 0 -> "这个文件读不了，确认是壹号栈导出的备份"
+                    n == 0 -> "没有可恢复的新内容"
+                    else -> "已恢复 $n 项 · 设置项重开 App 后生效"
+                },
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     /* 装更新：系统没给「安装未知应用」权限就先跳去开关页，别让用户对着「没反应」发呆 */
@@ -536,6 +591,48 @@ fun SettingsScreen(
                             enabled = local.recents.isNotEmpty()
                         ) { Text("清除", fontSize = 13.sp) }
                     }
+                }
+            }
+
+            /* ---------------- 我的内容 ----------------
+               摘录本：阅读页长按任意一段存下来的。放在备份上面 ——
+               同属「我自己攒的东西」，攒多了才轮到下面那组「备份/恢复」。 */
+            item { GroupTitle("我的内容") }
+            item {
+                SettingCard {
+                    InfoRow(
+                        "摘录本",
+                        local.extracts.size.toString() + " 段 · 看/删/转随记 →",
+                        onClick = onExtracts
+                    )
+                    InfoRow(
+                        "站点巡检",
+                        "抽查打不开的站 →",
+                        onClick = onCheck
+                    )
+                }
+            }
+
+            /* ---------------- 备份与恢复 ----------------
+               这一组是「换手机」唯一的保险：上面那些数据一个都没有账号、不上云。 */
+            item { GroupTitle("备份与恢复") }
+            item {
+                SettingCard {
+                    Text(
+                        "收藏、稍后读、灵感随记、摘录、待整理、足迹、阅读进度和设置，打成一份 JSON。" +
+                            "换手机或重装之前导一份出去，丢网盘就行。",
+                        fontSize = 11.5.sp, lineHeight = 18.sp,
+                        color = LocalXyPal.current.mute
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    InfoRow("导出备份", "挑个地方存 →", onClick = {
+                        exportLauncher.launch(
+                            "yihaozhan-backup-" + Local.dayKey(System.currentTimeMillis()) + ".json"
+                        )
+                    })
+                    InfoRow("从备份恢复", "合并进去，不覆盖现有 →", onClick = {
+                        importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    })
                 }
             }
 

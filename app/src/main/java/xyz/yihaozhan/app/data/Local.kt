@@ -38,6 +38,31 @@ data class Idea(
 )
 
 /**
+ * 从别的 App 分享进来、还没归类的一条。
+ *
+ * 为什么先「收着」而不是直接建成随记：分享那一刻人还在别的 App 里，
+ * 不该被打断。等回到壹号栈再决定它是「写成随记」还是「加进站点收藏」。
+ */
+@Serializable
+data class InboxItem(
+    val id: String = "",
+    val text: String = "",
+    /** 从原文里抽出来的第一个网址；纯文字分享时为空 */
+    val url: String = "",
+    val ts: Long = 0L
+)
+
+/** 阅读页存下来的一段话 */
+@Serializable
+data class Extract(
+    val id: String = "",
+    val postId: String = "",
+    val postTitle: String = "",
+    val text: String = "",
+    val ts: Long = 0L
+)
+
+/**
  * 「我自己产生的那部分数据」—— 收藏、稍后读、最近打开、读到哪了、灵感随记。
  *
  * 为什么不跟站点数据混在一起：`app.json` 是站点后台的内容，对所有人生效、只读；
@@ -381,6 +406,247 @@ class Local private constructor(ctx: Context) {
         sp.edit().putString("ideas", XYJson.encodeToString(IDEA_LIST, ideas)).apply()
     }
 
+    /* ------------------------------ 待整理（外部分享） ------------------------------ */
+
+    /** 别人（或别的 App）分享进来的东西，新的在前 */
+    var inbox: List<InboxItem> by mutableStateOf(readInbox())
+        private set
+
+    fun addInbox(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        val one = InboxItem(
+            id = "b-" + System.currentTimeMillis().toString(36),
+            text = t,
+            url = urlIn(t),
+            ts = System.currentTimeMillis()
+        )
+        inbox = listOf(one) + inbox
+        saveInbox()
+        return true
+    }
+
+    fun removeInbox(id: String) {
+        inbox = inbox.filterNot { it.id == id }
+        saveInbox()
+    }
+
+    fun clearInbox() {
+        inbox = emptyList()
+        saveInbox()
+    }
+
+    /* ------------------------------ 摘录 ------------------------------ */
+
+    var extracts: List<Extract> by mutableStateOf(readExtracts())
+        private set
+
+    val sortedExtracts: List<Extract>
+        get() = extracts.sortedByDescending { it.ts }
+
+    fun addExtract(postId: String, postTitle: String, text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        /* 同一篇里同一段不重复存 —— 长按两次不该留两份 */
+        if (extracts.any { it.postId == postId && it.text == t }) return false
+        val one = Extract(
+            id = "e-" + System.currentTimeMillis().toString(36),
+            postId = postId,
+            postTitle = postTitle,
+            text = t,
+            ts = System.currentTimeMillis()
+        )
+        extracts = listOf(one) + extracts
+        saveExtracts()
+        return true
+    }
+
+    fun removeExtract(id: String) {
+        extracts = extracts.filterNot { it.id == id }
+        saveExtracts()
+    }
+
+    fun clearExtracts() {
+        extracts = emptyList()
+        saveExtracts()
+    }
+
+    /* ------------------------------ 全量备份 ------------------------------ */
+
+    /**
+     * 把「只在这台手机上」的所有东西打成一个 JSON：
+     * 收藏、稍后读、站点收藏、失效标记、最近打开、次数、每日计数、阅读位置、
+     * 灵感随记、摘录、待整理，以及设置。
+     *
+     * 为什么需要它：这些都没有账号、不上云，换手机 / 重装就等于归零。
+     * 导一份出去丢网盘，是现在这套架构里唯一靠谱的保险。
+     */
+    fun exportAllJson(prefs: Prefs): String {
+        fun arrOf(list: List<*>) = JSONArray().also { a -> list.forEach { a.put(it) } }
+        val o = JSONObject()
+        o.put("schema", 1)
+        o.put("app", "壹号栈")
+        o.put("exported", dateNow())
+        o.put("counts", JSONObject().apply {
+            put("ideas", ideas.size); put("extracts", extracts.size)
+            put("fav", fav.size); put("favLinks", favLinks.size)
+            put("inbox", inbox.size); put("recents", recents.size)
+        })
+        o.put("fav", arrOf(fav.toList()))
+        o.put("later", arrOf(later.toList()))
+        o.put("favLinks", arrOf(favLinks.toList()))
+        o.put("dead", arrOf(dead.toList()))
+        o.put("recents", JSONArray().also { a ->
+            recents.forEach { r ->
+                a.put(JSONObject().put("name", r.name).put("url", r.url).put("ts", r.ts))
+            }
+        })
+        o.put("visits", JSONObject(visits))
+        o.put("daily", JSONObject(daily))
+        o.put("pos", JSONObject(positions as Map<*, *>))
+        o.put("ideas", JSONArray().also { a ->
+            ideas.forEach { i ->
+                a.put(JSONObject().put("id", i.id).put("text", i.text)
+                    .put("ts", i.ts).put("pinned", i.pinned))
+            }
+        })
+        o.put("extracts", JSONArray().also { a ->
+            extracts.forEach { e ->
+                a.put(JSONObject().put("id", e.id).put("postId", e.postId)
+                    .put("postTitle", e.postTitle).put("text", e.text).put("ts", e.ts))
+            }
+        })
+        o.put("inbox", JSONArray().also { a ->
+            inbox.forEach { b ->
+                a.put(JSONObject().put("id", b.id).put("text", b.text)
+                    .put("url", b.url).put("ts", b.ts))
+            }
+        })
+        o.put("prefs", JSONObject(prefs.exportMap()))
+        return o.toString(2)
+    }
+
+    /**
+     * 恢复备份：**合并**，不清空现有的。
+     *
+     * 为什么是合并不是覆盖：手滑点错一次就把手机里的东西全换掉太狠了。
+     * 合并最坏情况只是多几条重复（正文/摘录都按内容去重，实际上不会重复）。
+     * 返回这次新加进来的条数；解析失败返回 -1。
+     */
+    fun importAllJson(text: String, prefs: Prefs): Int {
+        val o = runCatching { JSONObject(text) }.getOrNull() ?: return -1
+        var added = 0
+
+        fun strings(key: String): List<String> {
+            val a = o.optJSONArray(key) ?: return emptyList()
+            return (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } }
+        }
+
+        fun mapsInt(key: String): Map<String, Int> {
+            val j = o.optJSONObject(key) ?: return emptyMap()
+            return j.keys().asSequence().associateWith { j.optInt(it, 0) }
+                .filterValues { it > 0 }
+        }
+
+        fun mapsStr(key: String): Map<String, String> {
+            val j = o.optJSONObject(key) ?: return emptyMap()
+            return j.keys().asSequence().associateWith { j.optString(it, "") }
+                .filterValues { it.isNotBlank() }
+        }
+
+        val newFav = strings("fav")
+        if (newFav.isNotEmpty()) { fav = fav + newFav; writeIds("fav", fav); added += newFav.size }
+        val newLater = strings("later")
+        if (newLater.isNotEmpty()) { later = later + newLater; writeIds("later", later); added += newLater.size }
+        val newLinks = strings("favLinks")
+        if (newLinks.isNotEmpty()) { favLinks = favLinks + newLinks; writeIds("favLinks", favLinks); added += newLinks.size }
+        val newDead = strings("dead")
+        if (newDead.isNotEmpty()) { dead = dead + newDead; writeIds("dead", dead); added += newDead.size }
+
+        o.optJSONArray("recents")?.let { a ->
+            val byUrl = recents.associateBy { it.url }.toMutableMap()
+            for (i in 0 until a.length()) {
+                val r = a.optJSONObject(i) ?: continue
+                val u = r.optString("url")
+                if (u.isNotBlank() && u !in byUrl) {
+                    byUrl[u] = RecentLink(r.optString("name"), u, r.optLong("ts"))
+                    added++
+                }
+            }
+            recents = byUrl.values.sortedByDescending { it.ts }.take(MAX_RECENT)
+            sp.edit().putString("recents", XYJson.encodeToString(RECENT_LIST, recents)).apply()
+        }
+
+        val v = mapsInt("visits")
+        if (v.isNotEmpty()) {
+            visits = visits.toMutableMap().also { m -> v.forEach { (k, n) -> m[k] = maxOf(m[k] ?: 0, n) } }
+            writeCounts("visits", visits)
+            added += v.size
+        }
+        val d = mapsInt("daily")
+        if (d.isNotEmpty()) {
+            daily = daily.toMutableMap().also { m -> d.forEach { (k, n) -> m[k] = maxOf(m[k] ?: 0, n) } }
+            writeCounts("daily", daily)
+        }
+
+        val p = mapsStr("pos")
+        if (p.isNotEmpty()) {
+            p.forEach { (k, val2) -> if (k !in positions) { positions[k] = val2; added++ } }
+            posCount = positions.size
+            sp.edit().putString("pos", XYJson.encodeToString(POS_MAP, positions)).apply()
+        }
+
+        o.optJSONArray("ideas")?.let { a ->
+            val seen = ideas.map { it.text.trim() }.toMutableSet()
+            val out = ideas.toMutableList()
+            for (i in 0 until a.length()) {
+                val j = a.optJSONObject(i) ?: continue
+                val t = j.optString("text").trim()
+                if (t.isEmpty() || t in seen) continue
+                seen.add(t)
+                out.add(Idea(j.optString("id").ifBlank { "i-" + (j.optLong("ts", 0L).toString(36)) },
+                    t, j.optLong("ts", 0L), j.optBoolean("pinned", false)))
+                added++
+            }
+            ideas = out
+            saveIdeas()
+        }
+
+        o.optJSONArray("extracts")?.let { a ->
+            val out = extracts.toMutableList()
+            for (i in 0 until a.length()) {
+                val j = a.optJSONObject(i) ?: continue
+                val t = j.optString("text").trim()
+                if (t.isEmpty() || out.any { it.text.trim() == t }) continue
+                out.add(Extract(j.optString("id").ifBlank { "e-" + System.currentTimeMillis().toString(36) + i },
+                    j.optString("postId"), j.optString("postTitle"), t, j.optLong("ts", 0L)))
+                added++
+            }
+            extracts = out
+            saveExtracts()
+        }
+
+        o.optJSONArray("inbox")?.let { a ->
+            val out = inbox.toMutableList()
+            for (i in 0 until a.length()) {
+                val j = a.optJSONObject(i) ?: continue
+                val t = j.optString("text").trim()
+                if (t.isEmpty() || out.any { it.text.trim() == t }) continue
+                out.add(InboxItem(j.optString("id").ifBlank { "b-" + System.currentTimeMillis().toString(36) + i },
+                    t, j.optString("url"), j.optLong("ts", 0L)))
+                added++
+            }
+            inbox = out
+            saveInbox()
+        }
+
+        o.optJSONObject("prefs")?.let { j ->
+            prefs.importMap(j.keys().asSequence().associateWith { j.get(it) })
+        }
+
+        return added
+    }
+
     /* ------------------------------ 存取 ------------------------------ */
 
     private fun readIds(key: String): Set<String> = runCatching {
@@ -421,6 +687,32 @@ class Local private constructor(ctx: Context) {
             ?.let { XYJson.decodeFromString(IDEA_LIST, it) }
             ?: emptyList()
     }.getOrDefault(emptyList())
+
+    private fun readInbox(): List<InboxItem> = runCatching {
+        sp.getString("inbox", null)
+            ?.let { XYJson.decodeFromString(INBOX_LIST, it) }
+            ?: emptyList()
+    }.getOrDefault(emptyList())
+
+    private fun saveInbox() {
+        sp.edit().putString("inbox", XYJson.encodeToString(INBOX_LIST, inbox)).apply()
+    }
+
+    private fun readExtracts(): List<Extract> = runCatching {
+        sp.getString("extracts", null)
+            ?.let { XYJson.decodeFromString(EXTRACT_LIST, it) }
+            ?: emptyList()
+    }.getOrDefault(emptyList())
+
+    private fun saveExtracts() {
+        sp.edit().putString("extracts", XYJson.encodeToString(EXTRACT_LIST, extracts)).apply()
+    }
+
+    /** 从一段分享文字里抽第一个网址 —— 分享过来的通常是「标题 + 链接」混在一起 */
+    private fun urlIn(s: String): String {
+        val m = Regex("https?://[^\\s，。、）)】\\]\"'<>]+").find(s) ?: return ""
+        return m.value.trimEnd('.', ',', '。', ';', '；')
+    }
 
     /* ------------------------------ 导出/导入的小工具 ------------------------------ */
 
@@ -471,6 +763,8 @@ class Local private constructor(ctx: Context) {
         private val RECENT_LIST = ListSerializer(RecentLink.serializer())
         private val POS_MAP = MapSerializer(String.serializer(), String.serializer())
         private val IDEA_LIST = ListSerializer(Idea.serializer())
+        private val INBOX_LIST = ListSerializer(InboxItem.serializer())
+        private val EXTRACT_LIST = ListSerializer(Extract.serializer())
         private val COUNT_MAP = MapSerializer(String.serializer(), Int.serializer())
 
         @Volatile

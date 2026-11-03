@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  小组件的元信息。
+
+  updatePeriodMillis 最短就是 30 分钟（系统限制），所以「今日三站」一天之内不会自己换；
+  真正让它跟着变的是 App 里刷到新内容时主动发一次更新广播（见 Widget.refresh）。
+  resizeMode 允许横竖拉：横向拉长只是把每行撑宽，内容不重排。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_st"
+    android:minWidth="180dp"
+    android:minHeight="120dp"
+    android:minResizeWidth="140dp"
+    android:minResizeHeight="100dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_desc"
+    android:previewLayout="@layout/widget_preview"
+    android:targetCellWidth="4"
+    android:targetCellHeight="3" />

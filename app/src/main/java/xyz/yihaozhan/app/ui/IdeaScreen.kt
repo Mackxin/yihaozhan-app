@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.data.Idea
+import xyz.yihaozhan.app.data.InboxItem
 import xyz.yihaozhan.app.data.Local
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -85,9 +86,17 @@ import java.util.Locale
  * 跟电脑版对齐后的功能：站内搜索、🎲 随机回顾、标签改名/删除、草稿缓存（切页不丢）、
  * 按条存图、导出/导入 JSON 与 .md、Markdown 正文（走 App 自带的 Markdown.kt）。
  * 数据落在 [Local]（SharedPreferences），不跟着 app.json 走，每次「同步内容」都不会冲掉。
+ *
+ * 2.6.7 起头顶多一块「待整理」：别的 App 分享进来的文字/网址先躺在那儿，
+ * 在这儿决定它是「写成随记」还是「加进站点收藏」。`onOpenUrl` 用来点开那条网址。
  */
 @Composable
-fun IdeaScreen(local: Local, onBack: () -> Unit) {
+fun IdeaScreen(
+    local: Local,
+    onOpenUrl: (String) -> Unit = {},
+    onExtracts: () -> Unit = {},
+    onBack: () -> Unit
+) {
     val pal = LocalXyPal.current
     val ctx = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -204,6 +213,38 @@ fun IdeaScreen(local: Local, onBack: () -> Unit) {
             /* 页头整块跟着列表滚（跟分享/文章/导航一致，不钉在顶上） */
             item("head") { IdeaHead(all) }
 
+            /* 待整理：从别的 App 分享进来、还没归类的东西。
+               摆在页头下面第一块 —— 刚分享完跳过来，一眼就该看见它。 */
+            if (local.inbox.isNotEmpty()) {
+                item("inbox") {
+                    InboxCard(
+                        items = local.inbox,
+                        onToIdea = { one ->
+                            if (local.addIdea(one.text)) {
+                                local.removeInbox(one.id)
+                                Toast.makeText(ctx, "已记成随记", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onFav = { one ->
+                            if (one.url.isBlank()) {
+                                Toast.makeText(ctx, "这条里没有网址，收不进站点收藏", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val on = local.toggleFavLink(one.url)
+                                Toast.makeText(
+                                    ctx,
+                                    if (on) "已加进站点收藏" else "已取消收藏",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                local.removeInbox(one.id)
+                            }
+                        },
+                        onOpen = { one -> if (one.url.isNotBlank()) onOpenUrl(one.url) },
+                        onDelete = { one -> local.removeInbox(one.id) },
+                        onClear = { local.clearInbox() }
+                    )
+                }
+            }
+
             item("input") {
                 InputCard(
                     text = draft,
@@ -258,6 +299,9 @@ fun IdeaScreen(local: Local, onBack: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         LinkBtn(Icons.Rounded.Shuffle, "随机回顾") { doRandom() }
+                        Spacer(Modifier.width(6.dp))
+                        /* 摘录本：跟随记是一对（一个是我写的，一个是我摘的），入口放一起顺手 */
+                        LinkBtn(null, "摘录 ${local.extracts.size}") { onExtracts() }
                         Spacer(Modifier.weight(1f))
                         LinkBtn(null, "导出") { askExport = true }
                         Spacer(Modifier.width(6.dp))
@@ -514,6 +558,114 @@ private fun IdeaHead(all: List<Idea>) {
             StatBox(charText, charUnit, Modifier.weight(1f))
         }
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+/* ------------------------------ 待整理（外部分享进来的） ------------------------------ */
+
+/**
+ * 别的 App 分享进来的东西，先摆一块在这儿。
+ *
+ * 每条三个去处：写成随记（复制进随记列表）、加进站点收藏（只有带网址时才有）、删掉。
+ * 处理掉一条就从这儿消失 —— 这块不是「第二个收件箱」，只是分享进来的中转站，
+ * 用户明确不要一个越攒越多的列表。
+ */
+@Composable
+private fun InboxCard(
+    items: List<InboxItem>,
+    onToIdea: (InboxItem) -> Unit,
+    onFav: (InboxItem) -> Unit,
+    onOpen: (InboxItem) -> Unit,
+    onDelete: (InboxItem) -> Unit,
+    onClear: () -> Unit
+) {
+    val pal = LocalXyPal.current
+    CardBox(
+        padding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp),
+        /* 单独给一点底色：这块是「外面进来的」，跟本机写下的随记在视觉上分开一档 */
+        tint = pal.inkA1.copy(alpha = 0.07f)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📥", fontSize = 13.sp)
+            Spacer(Modifier.width(7.dp))
+            Text(
+                "待整理 ${items.size}",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = pal.text,
+                modifier = Modifier.weight(1f)
+            )
+            TinyBtn("全部删掉") { onClear() }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "从别的 App 分享过来的。挑个去处，处理完这块就没了。",
+            fontSize = 11.5.sp,
+            lineHeight = 18.sp,
+            color = pal.mute
+        )
+
+        items.forEachIndexed { i, one ->
+            if (i > 0) {
+                Spacer(Modifier.height(8.dp))
+                HairLine()
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                one.text,
+                fontSize = 13.5.sp,
+                lineHeight = 22.sp,
+                color = pal.text,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                /* 带网址的点正文直接打开那一页；没网址就只是一段字 */
+                modifier = if (one.url.isNotBlank()) {
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onOpen(one) }
+                } else Modifier.fillMaxWidth()
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (one.url.isNotBlank()) {
+                    Text(
+                        one.url,
+                        fontSize = 11.sp,
+                        color = pal.inkA1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
+                TinyBtn("写成随记", strong = true) { onToIdea(one) }
+                if (one.url.isNotBlank()) TinyBtn("收藏") { onFav(one) }
+                TinyBtn("删掉") { onDelete(one) }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+/** 卡片里那颗小小的文字钮（比 LinkBtn 再小一档，一行要挤三颗） */
+@Composable
+private fun TinyBtn(text: String, strong: Boolean = false, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (strong) pal.glassHi else Color.Transparent)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+    ) {
+        Text(text, fontSize = 11.5.sp, color = if (strong) pal.inkA1 else pal.dim)
     }
 }
 

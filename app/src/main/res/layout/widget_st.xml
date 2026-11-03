@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面小组件（2.6.7）。
+
+  只用 RemoteViews 支持的控件（LinearLayout / TextView / ImageView），
+  所以样式全靠 drawable 和 padding 撑 —— 不能上 Compose，也不引 Glance
+  （Glance 要另带一套 compose-runtime，为了一个小方块不值当）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="14dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/w_brand"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="壹号栈"
+            android:textColor="#F2FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/w_meta"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="end"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#8FA3B0C4"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- 三行站点：哪一行没内容就整行 GONE（不要在桌面上留三个空壳） -->
+    <LinearLayout
+        android:id="@+id/w_row1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/w_icon1"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="@drawable/widget_icon"
+            android:gravity="center"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:textColor="#FF9CB6FF" />
+
+        <TextView
+            android:id="@+id/w_name1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="9dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#F2FFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/w_cat1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:textColor="#7AA3B0C4"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/w_row2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/w_icon2"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="@drawable/widget_icon"
+            android:gravity="center"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:textColor="#FFC7A8FF" />
+
+        <TextView
+            android:id="@+id/w_name2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="9dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#F2FFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/w_cat2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:textColor="#7AA3B0C4"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/w_row3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/w_icon3"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="@drawable/widget_icon"
+            android:gravity="center"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:textColor="#FF7FE8DA" />
+
+        <TextView
+            android:id="@+id/w_name3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="9dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#F2FFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/w_cat3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:textColor="#7AA3B0C4"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/w_foot"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:maxLines="1"
+        android:text=""
+        android:textColor="#8FA3B0C4"
+        android:textSize="10sp" />
+</LinearLayout>

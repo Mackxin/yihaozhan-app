@@ -414,8 +414,11 @@ private fun buildGroups(
         }
     )
 
+    /* 正文也进搜索：以前只搜标题/摘要/标签，长文章里的关键词一个都搜不到 ——
+       搜「Compose」本该搜出那篇讲 Compose 的，结果什么都没有，看着像丢了数据。
+       4 篇长文总共三千来字，本机扫一遍是零成本。 */
     val posts = data.posts.filter {
-        has(it.title) || has(it.excerpt) || it.tags.any { t -> has(t) }
+        has(it.title) || has(it.excerpt) || has(it.body) || it.tags.any { t -> has(t) }
     }
     add(
         "文章", "篇文章", posts.size, 2,

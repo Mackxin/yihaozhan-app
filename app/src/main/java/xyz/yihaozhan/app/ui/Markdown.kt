@@ -320,3 +320,39 @@ fun MdBlockView(
         }
     }
 }
+
+/* ============================ 块 → 纯文字 ============================ */
+
+/**
+ * 一块正文取它的纯文字：摘录、复制、朗读都走这一份。
+ *
+ * 为什么要剥行内标记：`**重点**`、`` `代码` ``、`[文字](链接)` 这些是**给屏幕看的**，
+ * 存进摘录本或交给 TTS 念出来时，星号和反引号只会碍事 —— 念出来是「星号星号」。
+ */
+fun mdBlockText(b: MdBlock): String = when (b) {
+    is MdBlock.Heading -> stripInline(b.text)
+    is MdBlock.Para -> stripInline(b.text)
+    is MdBlock.Quote -> b.text.lines().joinToString("\n") { stripInline(it) }
+    is MdBlock.Bullets -> b.items.joinToString("\n") { "· " + stripInline(it) }
+    is MdBlock.Numbers ->
+        b.items.mapIndexed { i, s -> "${i + 1}. " + stripInline(s) }.joinToString("\n")
+    is MdBlock.Code -> b.code.trimEnd()
+    /* 表格按「一行一条、格子用空格隔开」——跟屏幕上那个渲染保持一致 */
+    is MdBlock.Table -> b.rows.joinToString("\n") { row -> row.joinToString("  ") }
+}
+
+private val RE_MD_IMG = Regex("!\\[([^\\]]*)]\\([^)]*\\)")
+private val RE_MD_LINK = Regex("\\[([^\\]]*)]\\([^)]*\\)")
+private val RE_MD_CODE = Regex("`([^`]*)`")
+
+/** 剥掉行内标记，只留字 */
+fun stripInline(s: String): String {
+    var t = s
+    t = RE_MD_IMG.replace(t) { it.groupValues[1] }
+    t = RE_MD_LINK.replace(t) { it.groupValues[1] }
+    t = RE_MD_CODE.replace(t) { it.groupValues[1] }
+    t = t.replace("**", "").replace("~~", "").replace("__", "")
+    /* 单个 `*` / `_` 当强调标记去掉；正文里真有星号的地方很少，权衡下来这样更干净 */
+    t = t.replace(Regex("(?<![\\w])[*_](?=\\S)"), "").replace(Regex("(?<=\\S)[*_](?![\\w])"), "")
+    return t.trim()
+}

@@ -1,5 +1,6 @@
 package xyz.yihaozhan.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -45,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,9 +79,11 @@ import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
 import xyz.yihaozhan.app.ui.ChangelogScreen
+import xyz.yihaozhan.app.ui.CheckScreen
 import xyz.yihaozhan.app.ui.LocalOpenTag
 import xyz.yihaozhan.app.ui.TagScreen
 import xyz.yihaozhan.app.ui.FeedScreen
+import xyz.yihaozhan.app.ui.ExtractScreen
 import xyz.yihaozhan.app.ui.FootprintScreen
 import xyz.yihaozhan.app.ui.HelpScreen
 import xyz.yihaozhan.app.ui.HomeScreen
@@ -106,10 +110,26 @@ import xyz.yihaozhan.app.ui.enterPop
 import xyz.yihaozhan.app.ui.enterRise
 import xyz.yihaozhan.app.ui.orderedPosts
 
+/**
+ * 从 Activity 外面递进来的一件事：进来要直接打开哪一页。
+ *
+ * 为什么需要这一层：分享（`ACTION_SEND`）和长按图标的快捷方式都只到得了 Activity 的
+ * intent，而「打开随记页 / 搜索 / 稍后读」这些状态活在 Compose 里面，两边够不着。
+ * 于是 Activity 把「要做的事」写进 [MainActivity.hook]，`AppRoot` 里的
+ * `LaunchedEffect` 取走一次再置空 —— 不能直接改 Compose 状态，也不能用标志位不清。
+ */
+data class BootAction(val page: String, val url: String = "")
+
 class MainActivity : ComponentActivity() {
+
+    /** 一次性信使：`AppRoot` 消费完就置空，所以旋转屏幕/重组不会重复跳页 */
+    private val hook = mutableStateOf<BootAction?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        /* 冷启动也要看一眼：可能是「分享到壹号栈」或者快捷方式把 App 拉起来的 */
+        takeIntent(intent)
         val prefs = Prefs.of(this)
         setContent {
             /* vm 提到主题外面：站点后台「主题」页选的那套外观得在铺底色之前就知道，
@@ -124,10 +144,52 @@ class MainActivity : ComponentActivity() {
             YiTheme(dark = dark, cfg = vm.ui.data?.theme) {
                 /* 极光背景铺在最底下，整页（含状态栏、底栏后面）都是那三团光 */
                 AuroraBackground {
-                    AppRoot(vm, prefs, dark)
+                    AppRoot(vm, prefs, dark, hook)
                 }
             }
         }
+    }
+
+    /**
+     * App 已经在后台时，分享进来/点快捷方式走这里（Manifest 里设了 singleTask）。
+     * 以前没重写它 —— 那样系统会另起一个实例，收下东西的是新的一份，很不像话。
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takeIntent(intent)
+    }
+
+    /**
+     * 认两种 intent：
+     *  1. `ACTION_SEND` —— 别的 App「分享到」的一段文字（多半带个网址），存进「待整理」；
+     *  2. 带 `page` extra 的 —— 长按图标那三个快捷方式，直接跳到对应页面。
+     *
+     * 处理完就把标记抹掉（action 置空 / 删 extra）：进程被系统回收后，会拿同一个 Intent
+     * 重建 Activity，不抹就会把同一条分享重复收一遍。
+     */
+    private fun takeIntent(i: Intent?) {
+        if (i == null) return
+
+        if (i.action == Intent.ACTION_SEND) {
+            val text = i.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+            i.action = null
+            setIntent(i)
+            if (text.isNotEmpty() && Local.of(this).addInbox(text)) {
+                Toast.makeText(this, "已收进「待整理」", Toast.LENGTH_SHORT).show()
+                hook.value = BootAction("idea")
+            }
+            return
+        }
+
+        val page = i.getStringExtra("page")
+        val url = i.getStringExtra("open_url")
+        if (page == null && url == null) return
+        i.removeExtra("page")
+        i.removeExtra("open_url")
+        setIntent(i)
+        /* 小组件点某一行带的是网址：直接进 App 内预览那一页，不甩给浏览器 */
+        hook.value = if (!url.isNullOrBlank()) BootAction("web", url) else BootAction(page.orEmpty())
     }
 }
 
@@ -156,7 +218,7 @@ private const val PICK_POST_TAG = 3
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
+private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<BootAction?>) {
     val context = LocalContext.current
     /* 收藏 / 稍后读 / 最近打开 / 读到哪：本机数据，一份单例 */
     val local = remember { Local.of(context) }
@@ -180,6 +242,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
     var logOpen by rememberSaveable { mutableStateOf(false) }
     /* 标签页：点任何一个 #标签 打开它，空串 = 没开 */
     var tagOpen by rememberSaveable { mutableStateOf("") }
+    /* 摘录本（2.6.7）：阅读页长按存下来的段落，从随记页工具条或设置里进 */
+    var exOpen by rememberSaveable { mutableStateOf(false) }
+    /* 站点巡检（2.6.7）：设置里进去抽查站点通不通 */
+    var checkOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 每个页签各有一条滚动状态，统统提到这儿持有。
        为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：
@@ -264,6 +330,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
         helpOpen = false
         logOpen = false
         tagOpen = ""
+        exOpen = false
+        checkOpen = false
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -291,12 +359,50 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
 
     val goTab: (Int) -> Unit = { id -> jump(id, false) }
 
+    /* Activity 递进来的一件事（外部分享 / 长按快捷方式）：取走一次就置空。
+       置空这一步不能省 —— 留着一个非空值的话，以后每次重组都会再跳一遍那一页。 */
+    val boot by hook
+    LaunchedEffect(boot) {
+        val b = boot ?: return@LaunchedEffect
+        hook.value = null
+        when (b.page) {
+            /* 分享进来的东西存在「待整理」里，人先落到随记页把它收拾掉；
+               顺手把阅读页/网页预览关掉，不然底栏按 openPost/webUrl 判显隐会一起消失 */
+            "idea" -> {
+                openPost = null
+                webUrl = null
+                ideaOpen = true
+            }
+            "search" -> {
+                openPost = null
+                webUrl = null
+                searchOpen = true
+            }
+            "later" -> {
+                savedSegHint = 1
+                jump(5, false)
+            }
+            "post" -> jump(2, false)
+            "nav" -> jump(3, false)
+            "saved" -> {
+                savedSegHint = 0
+                jump(5, false)
+            }
+            /* 桌面小组件点了某一站：进 App 内的网页预览，不跳去浏览器 */
+            "web" -> {
+                openPost = null
+                webUrl = b.url
+            }
+            "home" -> jump(0, false)
+        }
+    }
+
     /* 返回键：先退网页预览，再退阅读页 / 内置页，退完才退出 App。
        2.6 修：灵感随记、足迹、关于这三个内置页以前没进这个判断，
        按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
-            helpOpen || logOpen || tagOpen.isNotBlank()
+            helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -306,6 +412,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
             helpOpen -> helpOpen = false
             logOpen -> logOpen = false
             tagOpen.isNotBlank() -> tagOpen = ""
+            exOpen -> exOpen = false
+            checkOpen -> checkOpen = false
             else -> openPost = null
         }
     }
@@ -371,7 +479,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                             WebScreen(webUrl!!, { webUrl = null }, external, dark)
                         }
                         ideaOpen -> Box(Modifier.fillMaxSize().enterRise()) {
-                            IdeaScreen(local) { ideaOpen = false }
+                            IdeaScreen(
+                                local, open,
+                                onExtracts = { exOpen = true }
+                            ) { ideaOpen = false }
                         }
                         aboutOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                             AboutScreen(data, { aboutOpen = false }, open)
@@ -392,6 +503,25 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                 onBack = { tagOpen = "" },
                                 onOpenUrl = { u -> open(u) },
                                 onOpenPost = { p -> openPost = p }
+                            )
+                        }
+                        exOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            ExtractScreen(
+                                local = local,
+                                posts = data.posts,
+                                onOpenPost = { p ->
+                                    exOpen = false
+                                    openPost = p
+                                },
+                                onBack = { exOpen = false }
+                            )
+                        }
+                        checkOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            CheckScreen(
+                                data = data,
+                                local = local,
+                                onOpen = { u -> open(u) },
+                                onBack = { checkOpen = false }
                             )
                         }
                         openPost != null -> {
@@ -570,7 +700,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean) {
                                             SettingsScreen(
                                                 prefs, vm, open, local, setList,
                                                 onHelp = { helpOpen = true },
-                                                onLog = { logOpen = true }
+                                                onLog = { logOpen = true },
+                                                onExtracts = { exOpen = true },
+                                                onCheck = { checkOpen = true }
                                             )
                                         }
                                     }

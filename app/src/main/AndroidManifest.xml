@@ -15,9 +15,12 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.YiHaoZhan">
 
+        <!-- singleTask：在别的 App 里点「分享 → 壹号栈」时，要回到已经在后台的这一份，
+             而不是再起一个实例叠上去（那样收下东西的是新的一份，旧的那份还在后面待着） -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.YiHaoZhan">
@@ -25,10 +28,35 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 「分享到」能选到壹号栈：只收纯文字（含网址），图片视频一概不收 ——
+                 收了也没地方存，反而会让分享面板多出一个点了没反应的项 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- 长按桌面图标的三个快捷方式（res/xml/shortcuts.xml） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
-        <!-- 下载好的安装包要通过 content:// 交给系统安装器，Android 7 起不许直接给 file:// -->
-        <provider
+        <!-- 桌面小组件：今日三站 + 待读数。exported=false —— 只接系统自己的更新广播 -->
+        <receiver
+            android:name=".Widget"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
+
+        <!-- 下载好的安装包要通过 content:// 交给系统安装器，Android 7 起不许直接给 file:// -->        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"

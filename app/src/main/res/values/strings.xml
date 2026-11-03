@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">壹号栈</string>
+
+    <!-- 长按桌面图标弹出的三个快捷方式（Android 7.1+） -->
+    <string name="sc_search">全站搜索</string>
+    <string name="sc_idea">写随记</string>
+    <string name="sc_later">稍后读</string>
+
+    <!-- 桌面上「添加小组件」时看到的那句说明 -->
+    <string name="widget_desc">今日三站 · 待读数</string>
+
 </resources>

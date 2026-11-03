@@ -287,6 +287,35 @@ class Prefs private constructor(ctx: Context) {
             else -> "标准"
         }
 
+    /* ------------------------------ 备份用 ------------------------------ */
+
+    /**
+     * 把整份设置原样吐出来给备份用。
+     * 保留类型很重要 —— 恢复时若把 Int 写成 String，`sp.getInt` 会直接抛
+     * ClassCastException，一开机就崩。
+     */
+    fun exportMap(): Map<String, Any?> = sp.all
+
+    /**
+     * 恢复设置。只认 Boolean / Int / String，其余（集合之类）跳过。
+     *
+     * 注意：这里写进 SP 之后，内存里那些 mutableStateOf 不会自动跟着变 ——
+     * 设置页得重开 App 才显示新值。调用方要提示用户这一点。
+     */
+    fun importMap(m: Map<String, Any?>) {
+        if (m.isEmpty()) return
+        val e = sp.edit()
+        m.forEach { (k, v) ->
+            when (v) {
+                is Boolean -> e.putBoolean(k, v)
+                is Int -> e.putInt(k, v)
+                is Number -> e.putInt(k, v.toInt())
+                is String -> e.putString(k, v)
+            }
+        }
+        e.apply()
+    }
+
     companion object {
         /** 最大 tab 下标。加新页签时只改这里 + MainActivity 的 TABS。
             2.6 把「足迹」从页签挪成内置页，最大值回到 5 ——
