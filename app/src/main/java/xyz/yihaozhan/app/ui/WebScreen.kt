@@ -1,13 +1,19 @@
 package xyz.yihaozhan.app.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +83,30 @@ fun WebScreen(
     /* 打不开时的中文提示（WebView 自带那页是英文白屏，太生硬） */
     var failed by remember { mutableStateOf<String?>(null) }
 
+    /* 网页里的 <input type="file">（比如「本地音乐」页的「＋ 选歌」）在 WebView 里
+       默认是死的：不实现 onShowFileChooser，点了什么都不会发生。
+       这里挂一个系统文件选择器，选完把 Uri 回给网页，网页就能拿到 File。 */
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        val cb = fileCallback
+        fileCallback = null
+        if (cb != null) {
+            val data = res.data
+            val uris: Array<Uri>? = if (res.resultCode != Activity.RESULT_OK || data == null) null
+            else {
+                val clip = data.clipData
+                when {
+                    clip != null -> Array(clip.itemCount) { clip.getItemAt(it).uri }
+                    data.data != null -> arrayOf(data.data!!)
+                    else -> null
+                }
+            }
+            cb.onReceiveValue(uris)
+        }
+    }
+
     val web = remember {
         /* 千万别在这儿设 layoutParams：给了 MATCH_PARENT，原生 View 会铺满整个
            ComposeView，把上面的顶栏一起盖掉（试过，顶栏在语义树里还在，肉眼全白）。 */
@@ -89,6 +119,9 @@ fun WebScreen(
                 builtInZoomControls = false
                 displayZoomControls = false
                 cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                /* 网页里的音频不用每次先点一下才出声（切歌、接续上次进度都要） */
+                mediaPlaybackRequiresUserGesture = false
+                databaseEnabled = true
             }
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, u: String?, favicon: Bitmap?) {
@@ -126,6 +159,36 @@ fun WebScreen(
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     progress = newProgress / 100f
+                }
+
+                /* 网页点「选歌」/「上传」→ 弹系统选择器。不实现它，点了完全没反应 */
+                override fun onShowFileChooser(
+                    view: WebView?,
+                    callback: ValueCallback<Array<Uri>>?,
+                    params: FileChooserParams?
+                ): Boolean {
+                    fileCallback?.onReceiveValue(null)   // 上一次没走完的先放掉，别泄漏
+                    fileCallback = callback
+                    val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }
+                    return try {
+                        filePicker.launch(intent)
+                        true
+                    } catch (e: Exception) {
+                        /* 有些定制系统不认 accept 里那种复合类型，退回「什么都能选」再试一次 */
+                        try {
+                            filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                            })
+                            true
+                        } catch (e2: Exception) {
+                            fileCallback = null
+                            false
+                        }
+                    }
                 }
             }
             /* 底色先跟 App 对齐：不然浅色模式点开网页会白闪一下 */

@@ -12,8 +12,8 @@ android {
         applicationId = "xyz.yihaozhan.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 24
-        versionName = "2.6.7"
+        versionCode = 25
+        versionName = "2.6.8"
     }
 
     buildTypes {
