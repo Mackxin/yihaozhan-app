@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 自更新要拉起系统安装器；Android 8+ 还得用户手动允许一次「安装未知应用」 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 本地音乐：切出去之后还要接着放，靠前台服务顶住进程（带一条常驻控制条） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -42,6 +46,13 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- 本地音乐的前台服务：只为了「切出去还在放 + 通知栏能控制」。
+             exported=false —— 只接自己和 App 内部的命令 -->
+        <service
+            android:name=".MusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- 桌面小组件：今日三站 + 待读数。exported=false —— 只接系统自己的更新广播 -->
         <receiver

@@ -74,6 +74,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Local
+import xyz.yihaozhan.app.data.MusicPlay
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
@@ -90,6 +91,7 @@ import xyz.yihaozhan.app.ui.HomeScreen
 import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
+import xyz.yihaozhan.app.ui.MusicScreen
 import xyz.yihaozhan.app.ui.PickItem
 import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
@@ -193,9 +195,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Tab(val id: Int, val label: String, val icon: ImageVector)
+/**
+ * 这条链接是不是站点那个「本地音乐」页。
+ *
+ * `app.json` 的导航里它是一条完整网址（`https://mackxin.github.io/xingyu/#/music`），
+ * 后台自定义入口里也可能写成相对的 `#/music` —— 两种都算，统一认 `#/music` 这一段。
+ * 认出来就开内置页，不再塞进 WebView。
+ */
+private fun isMusicUrl(u: String): Boolean = u.contains("#/music")
 
-/* id 就是「底栏排序 / 显隐」设置里存的那个数字，别改 */
+private data class Tab(val id: Int, val label: String, val icon: ImageVector)/* id 就是「底栏排序 / 显隐」设置里存的那个数字，别改 */
 private val TABS = listOf(
     Tab(0, "首页", Icons.Rounded.Home),
     Tab(1, "分享", Icons.Rounded.Bolt),
@@ -222,6 +231,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     val context = LocalContext.current
     /* 收藏 / 稍后读 / 最近打开 / 读到哪：本机数据，一份单例 */
     val local = remember { Local.of(context) }
+    /* 播放器也在这儿挂一次：万一从通知栏回来时页面还没搭起来，服务那边也有上下文 */
+    LaunchedEffect(Unit) { MusicPlay.attach(context) }
     val ui = vm.ui
     val data = ui.data
     /* 只在设置里改过顺序/显隐时才重算：visibleTabs 是 getter，
@@ -246,6 +257,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     var exOpen by rememberSaveable { mutableStateOf(false) }
     /* 站点巡检（2.6.7）：设置里进去抽查站点通不通 */
     var checkOpen by rememberSaveable { mutableStateOf(false) }
+    /* 本地音乐（2.6.9）：从导航页「万物归一 → 本地音乐」进来。
+       以前这条链接指向网页版 #/music（WebView 里跑），现在换成本内置页。 */
+    var musicOpen by rememberSaveable { mutableStateOf(false) }
 
     /* 每个页签各有一条滚动状态，统统提到这儿持有。
        为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：
@@ -280,7 +294,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     val external = rememberOpener()
     val open: (String) -> Unit = { u ->
         if (u.isNotBlank()) {
-            if (prefs.linkInApp) webUrl = u else external(u)
+            /* 导航页那条「本地音乐」在 app.json 里是完整网址（…/#/music）。
+               认出来就开内置页，别再塞进 WebView —— 那正是「怎么不是内置的」那个问题。 */
+            if (isMusicUrl(u)) {
+                musicOpen = true
+            } else if (prefs.linkInApp) {
+                webUrl = u
+            } else {
+                external(u)
+            }
         }
     }
 
@@ -332,6 +354,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         tagOpen = ""
         exOpen = false
         checkOpen = false
+        musicOpen = false
         if (!keepQuery) query = ""
         picker = PICK_NONE
         val i = visible.indexOf(id)
@@ -394,6 +417,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 webUrl = b.url
             }
             "home" -> jump(0, false)
+            /* 通知栏点回来的（Intent extra page=music）：直接落到本地音乐 */
+            "music" -> {
+                openPost = null
+                webUrl = null
+                musicOpen = true
+            }
         }
     }
 
@@ -402,7 +431,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
        按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
-            helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen
+            helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen || musicOpen
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -414,6 +443,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             tagOpen.isNotBlank() -> tagOpen = ""
             exOpen -> exOpen = false
             checkOpen -> checkOpen = false
+            /* 音乐页退出去**不**停播 —— 它是个控制面板，不是播放开关 */
+            musicOpen -> musicOpen = false
             else -> openPost = null
         }
     }
@@ -443,10 +474,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
                 containerColor = Color.Transparent,
                 bottomBar = {
-                    /* 底栏只有两个地方该让位：阅读页（要整屏看正文）和站外网页预览。
-                       内置页（灵感随记 / 关于 / 足迹）一律留着底栏 —— 用户明确要求：
-                       「之后要是还有内置页面都要显示 tab 栏出来」。 */
-                    if (openPost == null && webUrl == null) {
+                    /* 底栏只在「站外网页预览」时**一定**让位。
+                       阅读页看设置：`dockInReader` 打开就留着（2.6.9 新增的开关），
+                       关着就是原样整屏看正文。
+                       内置页（灵感随记 / 关于 / 足迹 / 手册 / 版本更新 / 本地音乐）一律留着底栏 ——
+                       用户明确要求：「之后要是还有内置页面都要显示 tab 栏出来」。 */
+                    if (webUrl == null && (openPost == null || prefs.dockInReader)) {
                         BottomDock(
                             position = dockPos,
                             current = curId,
@@ -523,6 +556,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                 onOpen = { u -> open(u) },
                                 onBack = { checkOpen = false }
                             )
+                        }
+                        musicOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            MusicScreen { musicOpen = false }
                         }
                         openPost != null -> {
                             /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
@@ -602,6 +638,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                             savedSegHint = 0; jump(5, false)
                                         }
                                         raw.startsWith("about") -> aboutOpen = true
+                                        /* 本地音乐：站点的 #/music 在 App 里是内置页 */
+                                        raw.startsWith("music") -> musicOpen = true
                                         /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
                                            跟网页端顶栏那条「👣 足迹」一个去处 */
                                         raw.startsWith("insight") -> footOpen = true

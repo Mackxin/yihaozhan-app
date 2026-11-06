@@ -253,6 +253,14 @@ fun SettingsScreen(
                         desc = "每篇各记各的，下次点进去接着读（关掉就每次都从开头）",
                         checked = prefs.rememberPos
                     ) { prefs.updateRememberPos(it) }
+                    Spacer(Modifier.height(12.dp))
+                    HairLine()
+                    Spacer(Modifier.height(10.dp))
+                    SwitchRow(
+                        title = "阅读页显示底栏",
+                        desc = "打开后进文章也留着底部 Tab 栏，方便随手切页签；关掉就是整屏看正文",
+                        checked = prefs.dockInReader
+                    ) { prefs.updateDockInReader(it) }
                 }
             }
 

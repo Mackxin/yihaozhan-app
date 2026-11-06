@@ -66,6 +66,15 @@ class Prefs private constructor(ctx: Context) {
     var rememberPos by mutableStateOf(sp.getBoolean("rememberPos", true))
         private set
 
+    /**
+     * 阅读页要不要留着底部 Tab 栏？
+     *
+     * 默认关 —— 2.6.8 及以前阅读页一律整屏（底栏让位给正文）。
+     * 2.6.9 起做成开关：有人喜欢整屏沉浸，有人更想随手切页签。
+     */
+    var dockInReader by mutableStateOf(sp.getBoolean("dockInReader", false))
+        private set
+
     /* ---------------- 阅读：行距 / 字体（跟站点 read 那份配置对齐） ---------------- */
 
     /** 行距档位：0 紧凑 / 1 标准 / 2 宽松（对应倍率 1.7 / 1.95 / 2.2，跟网页端同一套） */
@@ -137,6 +146,11 @@ class Prefs private constructor(ctx: Context) {
     fun updateRememberPos(v: Boolean) {
         rememberPos = v
         sp.edit().putBoolean("rememberPos", v).apply()
+    }
+
+    fun updateDockInReader(v: Boolean) {
+        dockInReader = v
+        sp.edit().putBoolean("dockInReader", v).apply()
     }
 
     fun updateReadLine(v: Int) {
