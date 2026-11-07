@@ -350,53 +350,8 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    val keys = prefs.homeBlockList
-                    /* 全部板块都列出来（关掉的也在），开关状态就看它在不在列表里 */
-                    Prefs.HOME_BLOCKS.forEach { (key, label) ->
-                        val shown = keys.contains(key)
-                        val idx = keys.indexOf(key)
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    label, fontSize = 13.5.sp,
-                                    fontWeight = if (shown) FontWeight.Medium else FontWeight.Normal,
-                                    color = if (shown) MaterialTheme.colorScheme.onSurface
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            /* 上下挪顺序：只对显示中的项有意义 */
-                            if (shown) {
-                                Text(
-                                    "↑", fontSize = 15.sp,
-                                    color = if (idx > 0) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable(enabled = idx > 0) { prefs.moveHomeBlock(key, -1) }
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                                Text(
-                                    "↓", fontSize = 15.sp,
-                                    color = if (idx in 0 until keys.size - 1)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable(enabled = idx in 0 until keys.size - 1) {
-                                            prefs.moveHomeBlock(key, 1)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                            Switch(
-                                checked = shown,
-                                onCheckedChange = { prefs.toggleHomeBlock(key) }
-                            )
-                        }
-                    }
+                    /* 拖动排序，跟底栏那块一个手感 —— 上下箭头太小、挪一格点一次太累 */
+                    HomeBlocksEditor(prefs)
                 }
             }
 
@@ -951,6 +906,92 @@ private fun Segmented(
  * 手势用 `detectDragGesturesAfterLongPress`：长按超过阈值才接管，
  * 平时按下去不会跟外面 LazyColumn 的滚动打架（它会 consume，父级就收不到）。
  */
+/**
+ * 首页板块：长按一行直接拖动排序，右边开关决定露不露脸。
+ *
+ * 为什么分成「开着的（能拖）」「关掉的（不能拖）」两段：
+ * `homeBlockList` 存的**就是开着的那串 key 的顺序**，关掉的根本不在表里 ——
+ * 混在一起画的话，拖动时眼睛看到的落点和真实顺序对不上。分两段之后，
+ * 上面随便拖，下面打开会接到末尾（再拖上去就是了）。
+ */
+@Composable
+private fun HomeBlocksEditor(prefs: Prefs) {
+    val pal = LocalXyPal.current
+    val rowH = 46.dp
+    val step = with(LocalDensity.current) { rowH.toPx() }
+    var dragKey by remember { mutableStateOf<String?>(null) }
+    var dragDy by remember { mutableStateOf(0f) }
+
+    val labels = remember { Prefs.HOME_BLOCKS.toMap() }
+    val shown = prefs.homeBlockList
+    val hidden = Prefs.HOME_BLOCKS.map { it.first }.filter { it !in shown }
+
+    /** 一行：拖动手柄 + 名字 + 开关。show=false 就是「关掉的」那一段，不给拖 */
+    @Composable
+    fun line(key: String, on: Boolean) {
+        val dragging = dragKey == key
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(rowH)
+                .zIndex(if (dragging) 2f else 0f)
+                .offset { IntOffset(0, if (dragging) dragDy.roundToInt() else 0) }
+                .clip(RoundedCornerShape(12.dp))
+                .then(if (dragging) Modifier.background(pal.glassHi) else Modifier)
+                .then(
+                    /* 关掉的不接拖动手势 —— 一处都不该动 */
+                    if (on) Modifier.pointerInput(key) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragKey = key; dragDy = 0f },
+                            onDragEnd = { dragKey = null; dragDy = 0f },
+                            onDragCancel = { dragKey = null; dragDy = 0f }
+                        ) { change, delta ->
+                            change.consume()
+                            dragDy += delta.y
+                            val cur = prefs.homeBlockList.indexOf(key)
+                            if (dragDy > step * 0.6f && cur in 0 until prefs.homeBlockList.lastIndex) {
+                                prefs.moveHomeBlock(key, 1)
+                                dragDy -= step
+                            } else if (dragDy < -step * 0.6f && cur > 0) {
+                                prefs.moveHomeBlock(key, -1)
+                                dragDy += step
+                            }
+                        }
+                    } else Modifier
+                )
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("≡", fontSize = 16.sp, color = if (on) pal.mute else pal.mute.copy(alpha = 0.35f))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                labels[key].orEmpty(),
+                fontSize = 13.5.sp,
+                fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                color = if (on) pal.text else pal.mute,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(checked = on, onCheckedChange = { prefs.toggleHomeBlock(key) })
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        shown.forEach { line(it, true) }
+        if (hidden.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            HairLine()
+            Spacer(Modifier.height(4.dp))
+            hidden.forEach { line(it, false) }
+        }
+        Text(
+            "长按一行拖动换位置；开关决定它露不露脸。关掉的排在下面，重新打开会接在末尾。",
+            fontSize = 11.sp,
+            color = pal.mute,
+            modifier = Modifier.padding(top = 4.dp, start = 8.dp)
+        )
+    }
+}
+
 @Composable
 private fun TabOrderEditor(prefs: Prefs) {
     val pal = LocalXyPal.current
