@@ -52,6 +52,23 @@ class Prefs private constructor(ctx: Context) {
         sp.edit().putString("dataMirror", s).apply()
     }
 
+    /**
+     * 默认先问哪个源：`false` = GitHub 内置（正式源），`true` = 先问我自己的镜像。
+     *
+     * 为什么不直接「填了地址就用」：地址得留着 —— 平时走 GitHub、偶尔切镜像（或者反过来）都是常见用法，
+     * 一填就被迫生效、一关就得重填，太别扭。所以地址和「用不用」分开存。
+     * 老用户（存过 dataMirror 的）默认按「用镜像」，跟 2.7.1 的行为保持一致，不因为升级变哑。
+     */
+    var preferMirror by mutableStateOf(
+        sp.getBoolean("preferMirror", sp.getString("dataMirror", "").orEmpty().isNotEmpty())
+    )
+        private set
+
+    fun updatePreferMirror(on: Boolean) {
+        preferMirror = on
+        sp.edit().putBoolean("preferMirror", on).apply()
+    }
+
     /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 设置 / 5 收藏） */
     var startTab by mutableStateOf(sp.getInt("startTab", 0).coerceIn(0, LAST_TAB))
         private set

@@ -169,7 +169,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             ui = ui.copy(refreshing = true, error = null, note = null)
             val before = ui.data?.build.orEmpty()
-            val fresh = Repo.fetchRemote(ctx, prefs.dataMirror)
+            val fresh = Repo.fetchRemote(ctx, prefs.dataMirror, prefs.preferMirror)
             /* 拉到新内容就顺手让桌面小组件重画一遍：不然它只能等系统那 30 分钟一次的更新，
                用户会觉得「小组件是死的」 */
             if (fresh != null) runCatching { Widget.refresh(ctx) }

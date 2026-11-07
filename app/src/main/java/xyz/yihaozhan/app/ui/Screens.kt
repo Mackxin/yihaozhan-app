@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
+import xyz.yihaozhan.app.data.Cat
 import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Py
@@ -974,6 +975,36 @@ private fun TocSheet(
 
 /* ============================ 导航 ============================ */
 
+/**
+ * 「万物归一」这个分类的 id（站点后台里那一类的 id，别改）。
+ *
+ * 下面两条 App 内置页入口就补在这一类里 —— 跟「灵感随记」「本地音乐」摆在一起，
+ * 它们本来就是同一类东西：站点上看着是个入口，实际打开的是 App 自己的页面。
+ */
+private const val MINE_CAT_ID = "bk-mine"
+
+/**
+ * App 独有的两个页面：摘录本、站点巡检。
+ *
+ * **为什么不写进 `api/app.json`**：站点上没有这两页，写进数据的话老版本 App 会把它当普通网址
+ * 塞进 WebView，打开就是站点 404 —— 等于给旧版挖坑。所以只在渲染导航页时补，
+ * `url` 用 `app://` 前缀（不是能打开的网址），由 `MainActivity` 的 `open()` 认领成内置页。
+ * 新版本看得见、旧版本一个字都不受影响。
+ */
+private val APP_PAGE_ENTRIES = listOf(
+    LinkItem(name = "摘录本", url = "app://extract", icon = "✂️", desc = "阅读页长按存下来的段落，都攒在这儿"),
+    LinkItem(name = "站点巡检", url = "app://check", icon = "🩺", desc = "随机抽一批站点真敲一下，打不开的可以标失效")
+)
+
+/**
+ * 把 [APP_PAGE_ENTRIES] 补进「万物归一」。幂等：
+ * 万一以后真在站点数据里也配了同 url 的条目，这里就不再重复插。
+ */
+private fun withAppPages(cats: List<Cat>): List<Cat> = cats.map { c ->
+    if (c.id != MINE_CAT_ID) c
+    else c.copy(links = c.links + APP_PAGE_ENTRIES.filter { e -> c.links.none { it.url == e.url } })
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LinksScreen(
@@ -988,7 +1019,8 @@ fun LinksScreen(
 ) {
     val pal = LocalXyPal.current
     val ctx = LocalContext.current
-    val allCats = remember(data) { data.cats.filter { it.links.isNotEmpty() } }
+    /* 万物归一里补两条 App 内置页入口（摘录本 / 站点巡检），见 APP_PAGE_ENTRIES */
+    val allCats = remember(data) { withAppPages(data.cats.filter { it.links.isNotEmpty() }) }
     /* 「全部分类」选了某一类就只留它 —— 跟顶栏那颗胶囊联动 */
     val cats = remember(allCats, catId) {
         if (catId.isBlank()) allCats else allCats.filter { it.id == catId }
@@ -1043,6 +1075,13 @@ fun LinksScreen(
         local?.record(url, name)
         onOpen(url)
     }
+    /* `app://` 那两条是内置页、不是网址：不记「最近打开」（记了也打不开），
+       也不给收藏/标失效的菜单（收藏一个 app:// 没有意义）。 */
+    val isAppPage: (String) -> Boolean = { it.startsWith("app://") }
+    val openLink: (LinkItem) -> Unit = { l ->
+        if (isAppPage(l.url)) onOpen(l.url) else visit(l.name, l.url)
+    }
+    val longLink: (LinkItem) -> Unit = { l -> if (!isAppPage(l.url)) menuFor = l }
     val recents = local?.recents.orEmpty()
     val scope = rememberCoroutineScope()
 
@@ -1182,8 +1221,8 @@ fun LinksScreen(
                                             fav = l.url in favSet,
                                             dead = l.url in deadSet,
                                             showIcon = data.nav.icons,
-                                            onLongPress = { menuFor = l },
-                                            onOpen = { visit(l.name, l.url) }
+                                            onLongPress = { longLink(l) },
+                                            onOpen = { openLink(l) }
                                         )
                                     }
                                 }
@@ -1201,8 +1240,8 @@ fun LinksScreen(
                                             fav = l.url in favSet,
                                             dead = l.url in deadSet,
                                             showIcon = data.nav.icons,
-                                            onOpen = { visit(l.name, l.url) },
-                                            onLongPress = { menuFor = l }
+                                            onOpen = { openLink(l) },
+                                            onLongPress = { longLink(l) }
                                         )
                                     }
                                 }

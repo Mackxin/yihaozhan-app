@@ -53,12 +53,14 @@ object Repo {
     /**
      * 候选源，按顺序试，**第一个成功就返回**。
      *
-     * 顺序：自定义镜像（若填了，国内虚拟主机最快）→ Pages（正式源）→ raw → jsDelivr。
+     * 顺序：自定义镜像（选了「我的镜像」且填了地址，国内虚拟主机最快）→ Pages（正式源）→ raw → jsDelivr。
      * jsDelivr 放最后：它按分支缓存十来个小时，内容可能滞后，只当「总比没有强」。
+     *
+     * [preferMirror] = false 时镜像**完全不参与**（地址仍留着，下次切回来不用重填）。
      */
-    fun sources(mirror: String): List<String> = buildList {
+    fun sources(mirror: String, preferMirror: Boolean): List<String> = buildList {
         val m = mirror.trim()
-        if (m.isNotEmpty()) add(m)
+        if (preferMirror && m.isNotEmpty()) add(m)
         add(URL)
         add(RAW)
         add(JSDELIVR)
@@ -100,14 +102,19 @@ object Repo {
     /**
      * 拉远端：按 [sources] 顺序试，谁先成功用谁。全失败返回 null（调用方保留缓存）。
      *
-     * `mirror` 是设置里填的自定义源，空串就只用内置三个。
+     * `mirror` 是设置里填的自定义源，`preferMirror` 决定它排不排第一
+     * （空串或 false 就只用内置那三个）。
      */
-    suspend fun fetchRemote(ctx: Context, mirror: String = ""): AppPayload? =
+    suspend fun fetchRemote(
+        ctx: Context,
+        mirror: String = "",
+        preferMirror: Boolean = true
+    ): AppPayload? =
         withContext(Dispatchers.IO) {
             if (!online(ctx)) return@withContext null
             val t0 = System.currentTimeMillis()
             lastError = ""
-            for (u in sources(mirror)) {
+            for (u in sources(mirror, preferMirror)) {
                 val got = try {
                     fetchOne(ctx, u)
                 } catch (t: Throwable) {

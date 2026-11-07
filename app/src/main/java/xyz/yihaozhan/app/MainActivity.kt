@@ -321,7 +321,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         if (u.isNotBlank()) {
             /* 导航页那条「本地音乐」在 app.json 里是完整网址（…/#/music）。
                认出来就开内置页，别再塞进 WebView —— 那正是「怎么不是内置的」那个问题。 */
-            if (isMusicUrl(u)) {
+            /* 导航页「万物归一」里那两条 App 专属入口（摘录本 / 站点巡检）用 app:// 前缀：
+               它们不是网址、站点上也没有对应页面，只能在这儿认领成内置页。
+               故意用 app:// 而不是 #/xxx —— 万一哪天被复制出去，也不会把站点打开一个 404。 */
+            if (u.startsWith("app://")) {
+                when (u.removePrefix("app://").trimEnd('/')) {
+                    "extract" -> exOpen = true
+                    "check" -> checkOpen = true
+                }
+            } else if (isMusicUrl(u)) {
                 musicOpen = true
             } else if (prefs.linkInApp) {
                 webUrl = u

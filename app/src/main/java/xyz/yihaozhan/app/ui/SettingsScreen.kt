@@ -167,10 +167,10 @@ fun SettingsScreen(
             text = {
                 Column {
                     Text(
-                        "留空 = 只用内置的 GitHub 源。\n" +
-                            "填了自己的镜像（比如 https://你的域名），App 会先问它，成功后就不再等 GitHub —— " +
-                            "国内直连 GitHub 常常要十几秒。\n" +
-                            "只填域名也行，会自动补成 …/api/app.json。",
+                        "填你自己的镜像（国内虚拟主机、对象存储都行），填完自动切到「先问镜像」，\n" +
+                            "GitHub 仍留在后面兜底 —— 国内直连 GitHub 常常要十几秒。\n" +
+                            "只填域名也可以，会自动补成 …/api/app.json。\n" +
+                            "留空 = 关掉镜像，只用内置的 GitHub。",
                         fontSize = 12.5.sp, lineHeight = 20.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -188,6 +188,9 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     prefs.updateDataMirror(srcDraft)
+                    /* 填了地址就顺手切到「我的镜像」——
+                       刚填完却还在走 GitHub，是最容易让人以为「没生效」的一步 */
+                    if (srcDraft.isNotBlank()) prefs.updatePreferMirror(true)
                     editSrc = false
                     vm.refresh()
                 }) { Text("保存并立即同步") }
@@ -493,35 +496,85 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     HairLine()
-                    Spacer(Modifier.height(6.dp))
-                    /* 数据源：内置是 GitHub Pages；国内直连慢的话，填自己的镜像让它排第一 */
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                srcDraft = prefs.dataMirror
-                                editSrc = true
+                    Spacer(Modifier.height(8.dp))
+                    /* 数据源：两个里选一个「默认先问谁」。
+                       GitHub = 内置正式源；我的镜像 = 自己的虚拟主机，先问它，答不上再回落 GitHub。 */
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("数据源", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(
+                            if (prefs.preferMirror && prefs.dataMirror.isNotBlank()) "先问镜像"
+                            else if (prefs.preferMirror) "镜像还没填"
+                            else "GitHub 内置",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    Segmented(
+                        options = listOf("GitHub", "我的镜像"),
+                        selected = if (prefs.preferMirror) 1 else 0,
+                        compact = true
+                    ) { i ->
+                        val wantMirror = i == 1
+                        prefs.updatePreferMirror(wantMirror)
+                        /* 想用镜像但还没填地址：直接把输入框弹出来，省一次「再点一下」 */
+                        if (wantMirror && prefs.dataMirror.isBlank()) {
+                            srcDraft = ""
+                            editSrc = true
+                        } else if (prefs.dataMirror.isNotBlank() || !wantMirror) {
+                            vm.refresh()
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when {
+                            prefs.preferMirror && prefs.dataMirror.isNotBlank() ->
+                                "先问我自己的镜像，连不上再回落到 GitHub；下拉刷新也照这个顺序。"
+                            prefs.preferMirror ->
+                                "还没填地址，暂时仍走 GitHub。点下面那行填上。"
+                            else ->
+                                "走内置的 GitHub（Pages → 原始文件 → jsDelivr 兜底）。"
+                        },
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    /* 选「我的镜像」时才露地址行：选 GitHub 还把地址摆在那儿只会让人以为在用它 */
+                    if (prefs.preferMirror) {
+                        Spacer(Modifier.height(2.dp))
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    srcDraft = prefs.dataMirror
+                                    editSrc = true
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (prefs.dataMirror.isBlank()) "镜像地址" else prefs.dataMirror,
+                                    fontSize = 12.5.sp,
+                                    maxLines = 2,
+                                    color = if (prefs.dataMirror.isBlank())
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (prefs.dataMirror.isBlank()) {
+                                    Text(
+                                        "填域名即可，会自动补成 …/api/app.json",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("数据源", fontSize = 14.sp)
                             Text(
-                                if (prefs.dataMirror.isBlank())
-                                    "GitHub（内置，不用管）"
-                                else "自定义镜像：" + prefs.dataMirror,
-                                fontSize = 11.5.sp,
-                                maxLines = 2,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                if (prefs.dataMirror.isBlank()) "填写" else "修改",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
-                        Text(
-                            "修改",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
                     }
                 }
             }
