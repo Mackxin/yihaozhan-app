@@ -1,10 +1,12 @@
 package xyz.yihaozhan.app.data
 
+import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -40,7 +42,17 @@ data class Track(
     val lrc: String = "",
     val size: Long = 0L,
     /** 加了多久（毫秒），列表按它倒序：新加的在上 */
-    val added: Long = 0L
+    val added: Long = 0L,
+    /** 导入时的原始文件名（含扩展名）。扫本机去重靠它 —— 文件本体是随机名，认不出来 */
+    val src: String = ""
+)
+
+/** 一个歌单。只存曲目 id，歌被删掉时顺手摘掉，不留空引用 */
+@Serializable
+data class Playlist(
+    val id: String = "",
+    val name: String = "",
+    val ids: List<String> = emptyList()
 )
 
 /**
@@ -59,11 +71,13 @@ class MusicLib private constructor(ctx: Context) {
     private val app = ctx.applicationContext
     private val dir = File(app.filesDir, "music").apply { mkdirs() }
     private val indexFile = File(dir, "index.json")
+    private val listFile = File(dir, "playlists.json")
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
     private val ser = ListSerializer(Track.serializer())
+    private val listSer = ListSerializer(Playlist.serializer())
 
     /**
      * 导入/配歌词跑在后台线程，但回调里要弹 Toast、改界面 —— 那些必须在主线程。
@@ -74,6 +88,10 @@ class MusicLib private constructor(ctx: Context) {
 
     /** 曲库，新加的在前 */
     var tracks: List<Track> by mutableStateOf(emptyList())
+        private set
+
+    /** 歌单（自建的），顺序就是创建顺序 */
+    var lists: List<Playlist> by mutableStateOf(emptyList())
         private set
 
     /** 正在干什么（导入时显示「正在读取 3/8」），空串 = 空闲 */
@@ -98,10 +116,21 @@ class MusicLib private constructor(ctx: Context) {
         }.getOrDefault(emptyList())
             /* 文件被外部清掉（清缓存 / 手动删）时，索引里的残项要自己消失 */
             .filter { it.file.isNotBlank() && File(dir, it.file).exists() }
+
+        val ids = tracks.map { it.id }.toSet()
+        lists = runCatching {
+            if (listFile.exists()) json.decodeFromString(listSer, listFile.readText()) else emptyList()
+        }.getOrDefault(emptyList())
+            /* 歌单里若留着已删曲目的 id，读的时候顺手摘掉（不然点数会虚高） */
+            .map { it.copy(ids = it.ids.filter { id -> id in ids }) }
     }
 
     private fun save() {
         runCatching { indexFile.writeText(json.encodeToString(ser, tracks)) }
+    }
+
+    private fun saveLists() {
+        runCatching { listFile.writeText(json.encodeToString(listSer, lists)) }
     }
 
     fun audioFile(t: Track): File = File(dir, t.file)
@@ -172,7 +201,8 @@ class MusicLib private constructor(ctx: Context) {
             cover = cover,
             lrc = lrc,
             size = target.length(),
-            added = System.currentTimeMillis()
+            added = System.currentTimeMillis(),
+            src = name
         )
     }
 
@@ -181,6 +211,103 @@ class MusicLib private constructor(ctx: Context) {
         app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
     }.getOrNull()
+
+    /* ------------------------------ 扫本机 ------------------------------ */
+
+    /**
+     * 扫一遍系统媒体库里的音乐，回调给出**还没导入过**的那些 Uri。
+     *
+     * 为什么除了 SAF 还要这一条：手机里几十上百首歌，靠文件选择器一首首点太遭罪。
+     * 系统早就把音频索引好了，先把候选列出来，用户点头再一次复制进来。
+     *
+     * 去重按「原始文件名 + 大小」—— 复制进来的文件是随机名，认不出谁是谁，
+     * 所以 [Track] 里另存了一份 [Track.src]（原始名）。
+     * 另外 30 秒以下的多半是提示音、录音，直接跳过，别一股脑塞进曲库。
+     */
+    fun scanDevice(onDone: (newUris: List<Uri>) -> Unit) {
+        busy = "正在扫本机音乐"
+        Thread {
+            val out = mutableListOf<Uri>()
+            val have = tracks.map { dedupKey(it.src.ifBlank { it.title }, it.size) }.toSet()
+            runCatching {
+                val proj = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.IS_MUSIC
+                )
+                app.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, proj,
+                    "${MediaStore.Audio.Media.IS_MUSIC} != 0", null,
+                    "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+                )?.use { c ->
+                    val iId = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val iName = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val iSize = c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                    val iDur = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    while (c.moveToNext()) {
+                        val dur = c.getLong(iDur)
+                        if (dur in 1..29_999) continue
+                        val name = c.getString(iName) ?: continue
+                        if (dedupKey(name, c.getLong(iSize)) in have) continue
+                        out += ContentUris.withAppendedId(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, c.getLong(iId)
+                        )
+                    }
+                }
+            }
+            busy = ""
+            main.post { onDone(out) }
+        }.start()
+    }
+
+    private fun dedupKey(name: String, size: Long): String =
+        name.substringBeforeLast('.').trim().lowercase() + "|" + size
+
+    /* -------------------------------- 歌单 -------------------------------- */
+
+    fun newList(name: String): Playlist? {
+        val n = name.trim()
+        if (n.isEmpty()) return null
+        val pl = Playlist(
+            id = UUID.randomUUID().toString().replace("-", "").take(10),
+            name = n.take(24)
+        )
+        lists = lists + pl
+        saveLists()
+        return pl
+    }
+
+    fun renameList(id: String, name: String) {
+        val n = name.trim()
+        if (n.isEmpty()) return
+        lists = lists.map { if (it.id == id) it.copy(name = n.take(24)) else it }
+        saveLists()
+    }
+
+    fun delList(id: String) {
+        lists = lists.filter { it.id != id }
+        saveLists()
+    }
+
+    fun addToList(listId: String, trackId: String) {
+        lists = lists.map {
+            if (it.id == listId && trackId !in it.ids) it.copy(ids = it.ids + trackId) else it
+        }
+        saveLists()
+    }
+
+    fun pullFromList(listId: String, trackId: String) {
+        lists = lists.map {
+            if (it.id == listId) it.copy(ids = it.ids.filter { x -> x != trackId }) else it
+        }
+        saveLists()
+    }
+
+    /** 歌单里的曲目（按加入顺序，跳过错失的 id） */
+    fun listTracks(pl: Playlist): List<Track> =
+        pl.ids.mapNotNull { id -> tracks.firstOrNull { it.id == id } }
 
     /* ------------------------------ 标签 / 封面 ------------------------------ */
 
@@ -461,7 +588,10 @@ class MusicLib private constructor(ctx: Context) {
         File(dir, t.file).delete()
         if (t.cover.isNotBlank()) File(dir, t.cover).delete()
         tracks = tracks.filter { it.id != id }
+        /* 歌单里也得摘掉，否则「N 首」点进去少一首，看着像 bug */
+        lists = lists.map { it.copy(ids = it.ids.filter { x -> x != id }) }
         save()
+        saveLists()
         rev++
     }
 
@@ -471,7 +601,9 @@ class MusicLib private constructor(ctx: Context) {
             if (it.cover.isNotBlank()) File(dir, it.cover).delete()
         }
         tracks = emptyList()
+        lists = emptyList()
         save()
+        saveLists()
         rev++
     }
 

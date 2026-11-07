@@ -41,6 +41,16 @@ class Speaker(private val ctx: Context) {
     var speaking by mutableStateOf(false)
         private set
 
+    /** 语速倍率（0.8 / 1.0 / 1.25 / 1.5），改完对**下一次** speak 生效 */
+    var rate by mutableStateOf(1.0f)
+        private set
+
+    /** 定时停止：还剩几分钟（0 = 没设）。到点自动停并清零 */
+    var sleepMin by mutableStateOf(0)
+        private set
+
+    private var sleepTask: Runnable? = null
+
     private val main = Handler(Looper.getMainLooper())
     private var lastUtterance = ""
 
@@ -66,7 +76,7 @@ class Speaker(private val ctx: Context) {
                     .show()
                 return
             }
-            runCatching { t.setSpeechRate(1.0f) }
+            runCatching { t.setSpeechRate(rate) }
             t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
                 override fun onDone(utteranceId: String?) {
@@ -84,7 +94,9 @@ class Speaker(private val ctx: Context) {
 
         val body = text.trim()
         if (body.isEmpty()) return
-        stop()
+        /* 换一篇再念：只掐声音，**别撤定时器** —— 否则先设「30 分钟后停」再点朗读，
+           定时器当场就被清了，等于没设（这个顺序差异很容易漏） */
+        stopSpeak()
         val parts = splitForTts(body)
         parts.forEachIndexed { i, p ->
             val id = "xy-" + System.currentTimeMillis() + "-" + i
@@ -94,7 +106,40 @@ class Speaker(private val ctx: Context) {
         speaking = parts.isNotEmpty()
     }
 
+    /** 改语速。TTS 引擎没起来时先记着，等第一次 speak 再一起设 */
+    fun updateRate(v: Float) {
+        rate = v.coerceIn(0.5f, 2f)
+        if (ok) runCatching { tts?.setSpeechRate(rate) }
+    }
+
+    /** 定时停止：min 分钟后自动停（0 = 取消）。睡前听长文用 */
+    fun sleepAfter(min: Int) {
+        cancelSleep()
+        if (min <= 0) return
+        sleepMin = min
+        val r = Runnable {
+            sleepTask = null
+            sleepMin = 0
+            stop()
+        }
+        sleepTask = r
+        main.postDelayed(r, min * 60_000L)
+    }
+
+    private fun cancelSleep() {
+        sleepTask?.let { main.removeCallbacks(it) }
+        sleepTask = null
+        sleepMin = 0
+    }
+
     fun stop() {
+        stopSpeak()
+        /* 手动停也把定时撤掉，不然过一会儿又「自动停」一次，看着像鬼 */
+        cancelSleep()
+    }
+
+    /** 只掐掉这一次朗读，不动定时器 —— speak() 里换段落时用它 */
+    private fun stopSpeak() {
         runCatching { tts?.stop() }
         speaking = false
     }

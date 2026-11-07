@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -86,6 +87,7 @@ import xyz.yihaozhan.app.data.Py
 import xyz.yihaozhan.app.data.FeedItem
 import xyz.yihaozhan.app.data.LinkItem
 import xyz.yihaozhan.app.data.Post
+import xyz.yihaozhan.app.data.Snapshots
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -454,6 +456,7 @@ fun PostDetailScreen(
     }
 
     var showToc by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
     val fav = local?.isFav(post.id) == true
     val later = local?.isLater(post.id) == true
     val scrolled = listState.firstVisibleItemIndex > 2
@@ -511,9 +514,33 @@ fun PostDetailScreen(
                     icon = if (later) Icons.Rounded.Schedule else Icons.Rounded.Schedule,
                     desc = if (later) "移出稍后读" else "稍后读",
                     tint = if (later) pal.inkA3 else pal.dim
-                ) { local?.toggleLater(post.id) }
+                ) {
+                    /* 标「稍后读」的同时把正文抄一份到本机：站点拉新内容会整份覆盖，
+                       站上撤掉的稿子如果只留个 id，点进去就是空白（见 Snapshots 的注释） */
+                    local?.let { l ->
+                        l.toggleLater(post.id)
+                        if (post.id in l.later) Snapshots.save(ctx, post)
+                        else Snapshots.forget(ctx, post.id)
+                    }
+                }
                 BarIcon(Icons.Rounded.Share, "分享", pal.dim) {
                     shareText(ctx, post.title + "\n" + shareUrl)
+                }
+                BarIcon(Icons.Rounded.MoreHoriz, "更多", pal.dim) { showMore = true }
+            }
+
+            /* 念着的时候才出现的「语速 / 定时」条。
+               不念的时候藏起来 —— 顶栏已经五颗键了，再多就挤。 */
+            if (spk.speaking) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 14.dp, end = 14.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    VoiceChips(spk)
                 }
             }
 
@@ -647,6 +674,41 @@ fun PostDetailScreen(
                     scope.launch { listState.animateScrollToItem(idx) }
                 },
                 onDismiss = { showToc = false }
+            )
+        }
+
+        /* 「更多」：存成 .md / 复制全文 / 浏览器打开。
+           导出的是 Markdown 原文，不是排版后的 HTML —— 拿到别处还能改、能进笔记软件。 */
+        if (showMore) {
+            val mdText = remember(post.id, post.body) {
+                buildString {
+                    append("# ").append(post.title).append("\n\n")
+                    if (post.date.isNotBlank()) append(post.date).append("\n\n")
+                    append(post.body.trim()).append("\n\n")
+                    append("---\n来源：").append(shareUrl).append("\n")
+                }
+            }
+            CardMenu(
+                title = post.title,
+                sub = "存一份带走，或者复制成纯文本",
+                actions = listOf(
+                    CardAction("📄", "存为 .md 文件") {
+                        showMore = false
+                        val f = writeCacheText(ctx, post.id + ".md", mdText)
+                        if (f != null) shareFile(ctx, f, "text/markdown")
+                        else brief(ctx, "没写出来，磁盘满了？")
+                    },
+                    CardAction("📋", "复制全文") {
+                        showMore = false
+                        copyText(ctx, mdText)
+                        brief(ctx, "全文已复制")
+                    },
+                    CardAction("🌐", "在浏览器里打开") {
+                        showMore = false
+                        onOpen(shareUrl)
+                    }
+                ),
+                onClose = { showMore = false }
             )
         }
 
@@ -1014,6 +1076,17 @@ fun LinksScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
+                            /* 两千个站点，翻十年也翻不到底 —— 让骰子替人挑一个。
+                               跳过标了失效的，不然十次有三次开到打不开的 */
+                            if (!searching) {
+                                HeadPill("🎲 随便逛逛") {
+                                    val pool = data.cats.asSequence()
+                                        .flatMap { it.links.asSequence() }
+                                        .filter { it.url !in deadSet }
+                                        .toList()
+                                    if (pool.isNotEmpty()) onOpen(pool.random().url)
+                                }
+                            }
                             /* 只看收藏：只有真收藏过才露出来，免得空按 */
                             if (favSet.isNotEmpty()) {
                                 HeadPill(
@@ -1458,8 +1531,17 @@ fun SavedScreen(
     val favs = remember(local.fav, posts) {
         posts.filter { it.id in local.fav }.sortedByDescending { it.date }
     }
+    /* 稍后读：站点数据优先；站点上已经没有的（撤稿 / 清过缓存）用本机快照兜底，
+       否则列表还在、点进去空白，看着像坏了 */
+    val ctx = LocalContext.current
     val laters = remember(local.later, posts) {
-        posts.filter { it.id in local.later }.sortedByDescending { it.date }
+        val ids = local.later
+        val live = posts.filter { it.id in ids }
+        val liveIds = live.map { it.id }.toSet()
+        val ghosts = Snapshots.all(ctx)
+            .filter { it.id in ids && it.id !in liveIds }
+            .map { Snapshots.toPost(it) }
+        (live + ghosts).sortedByDescending { it.date }
     }
 
     /* 站点里网址 → (名字, 分类名)：收藏只存网址，显示时再回 app.json 里查一遍名字；
@@ -1621,4 +1703,50 @@ fun SavedScreen(
         }
     }
     }
+}
+
+/* -------------------------- 阅读页：朗读语速 / 定时 -------------------------- */
+
+/** 一句话提示。App 里到处都是 Toast.makeText，这里收一处，省得每处都写三行 */
+private fun brief(ctx: android.content.Context, msg: String) =
+    Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+
+/**
+ * 念着的时候顶在正文上沿的一排小胶囊：语速四档 + 定时停止。
+ *
+ * 为什么只在「正在念」时出现：平时看不见，就不占地方，也不用担心顶栏挤。
+ * 整排可以横滑 —— 小屏上七颗胶囊排不满一行，硬塞会压成两行把正文挤下去。
+ */
+@Composable
+private fun VoiceChips(spk: Speaker) {
+    val pal = LocalXyPal.current
+    listOf(0.8f to "0.8×", 1f to "1.0×", 1.25f to "1.25×", 1.5f to "1.5×").forEach { (r, label) ->
+        MiniChip(label, spk.rate == r) { spk.updateRate(r) }
+    }
+    Box(Modifier.width(1.dp).height(16.dp).background(pal.outline))
+    listOf(0, 15, 30, 60).forEach { m ->
+        MiniChip(
+            text = if (m == 0) "不定时" else "定时 $m 分",
+            active = m != 0 && spk.sleepMin == m
+        ) { spk.sleepAfter(m) }
+    }
+}
+
+@Composable
+private fun MiniChip(text: String, active: Boolean, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    Text(
+        text,
+        fontSize = 11.5.sp,
+        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (active) XY_INK else pal.dim,
+        modifier = Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .then(
+                if (active) Modifier.background(pal.grad())
+                else Modifier.background(pal.glassHi)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    )
 }

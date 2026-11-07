@@ -54,6 +54,38 @@ object MusicPlay {
             else -> "顺序播放"
         }
 
+    /** 睡眠定时：还剩几分钟（0 = 没设） */
+    var sleepMin by mutableStateOf(0)
+        private set
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var sleepTask: Runnable? = null
+
+    /**
+     * 定时暂停。到点只是 `pause()`，不销毁播放器 —— 第二天点一下播放还能接着听，
+     * 也不用重新准备音频（准备一次要读盘 + 解析，比暂停重启慢得多）。
+     */
+    fun sleepAfter(min: Int) {
+        cancelSleep()
+        if (min <= 0) return
+        sleepMin = min
+        val r = Runnable {
+            sleepTask = null
+            sleepMin = 0
+            runCatching { mp?.pause() }
+            playing = false
+            push()
+        }
+        sleepTask = r
+        main.postDelayed(r, min * 60_000L)
+    }
+
+    fun cancelSleep() {
+        sleepTask?.let { main.removeCallbacks(it) }
+        sleepTask = null
+        sleepMin = 0
+    }
+
     fun attach(ctx: Context) {
         if (app == null) {
             app = ctx.applicationContext
@@ -141,6 +173,7 @@ object MusicPlay {
         posMs = 0
         cur = null
         index = -1
+        cancelSleep()
         MusicService.shutdown(app)
     }
 
