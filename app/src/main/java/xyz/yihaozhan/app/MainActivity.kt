@@ -44,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -260,6 +261,30 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 本地音乐（2.6.9）：从导航页「万物归一 → 本地音乐」进来。
        以前这条链接指向网页版 #/music（WebView 里跑），现在换成本内置页。 */
     var musicOpen by rememberSaveable { mutableStateOf(false) }
+
+    /*
+     * 回到前台时对一次内容。
+     *
+     * 为什么非加不可：ViewModel 活着的时候 boot() 只跑一次 —— 早上打开过、晚上切回来，
+     * 看到的还是早上那份数据（除非自己往下拉）。用户对「App 不更新」的抱怨多半来自这里。
+     * 节流放在 vm 里（60 秒），锁屏解锁、切出去回个消息不会每次发请求。
+     */
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.onForeground()
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
+    }
+
+    /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应 */
+    LaunchedEffect(ui.note) {
+        ui.note?.let { n ->
+            Toast.makeText(context, n, Toast.LENGTH_SHORT).show()
+            vm.clearNote()
+        }
+    }
 
     /* 每个页签各有一条滚动状态，统统提到这儿持有。
        为什么：顶栏那颗「壹号栈」要能在**任意页签**上做「到底 / 回顶」（小宝 2.6.4 的要求：

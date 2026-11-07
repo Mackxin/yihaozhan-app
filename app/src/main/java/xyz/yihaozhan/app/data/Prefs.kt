@@ -30,6 +30,28 @@ class Prefs private constructor(ctx: Context) {
     var autoSync by mutableStateOf(sp.getBoolean("autoSync", true))
         private set
 
+    /**
+     * 自定义数据源（自己的镜像 / 国内虚拟主机）。
+     *
+     * 空串 = 只用 App 内置那几个源（GitHub Pages → raw → jsDelivr）。
+     * 填了就让**它排第一**，成功就不再问 GitHub —— 国内直连 Pages 常常要等十几秒。
+     * 存的是完整文件地址；用户只填域名或目录时由 [updateDataMirror] 补成 `…/api/app.json`。
+     */
+    var dataMirror by mutableStateOf(sp.getString("dataMirror", "").orEmpty())
+        private set
+
+    fun updateDataMirror(v: String) {
+        var s = v.trim()
+        if (s.isNotEmpty()) {
+            if (!s.startsWith("http://") && !s.startsWith("https://")) s = "https://$s"
+            s = s.trimEnd('/')
+            /* 只填了域名/目录的，补成文件路径；已经指到 .json 的原样用 */
+            if (!s.endsWith(".json")) s = "$s/api/app.json"
+        }
+        dataMirror = s
+        sp.edit().putString("dataMirror", s).apply()
+    }
+
     /** 启动停在哪一页（对应 tab 下标，0 首页 / 1 分享 / 2 文章 / 3 导航 / 4 设置 / 5 收藏） */
     var startTab by mutableStateOf(sp.getInt("startTab", 0).coerceIn(0, LAST_TAB))
         private set

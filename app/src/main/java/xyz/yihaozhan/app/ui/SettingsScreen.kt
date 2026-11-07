@@ -36,6 +36,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -92,6 +94,9 @@ fun SettingsScreen(
     val data = ui.data
     val ctx = LocalContext.current
     var cacheSize by remember(data, ui.lastSync) { mutableStateOf(Repo.cacheSize(ctx)) }
+    /* 自定义数据源：改之前把当前值抄进 draft，取消就丢掉 */
+    var editSrc by remember { mutableStateOf(false) }
+    var srcDraft by remember { mutableStateOf("") }
     val version = remember {
         runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
@@ -150,6 +155,47 @@ fun SettingsScreen(
             if (UpdateRepo.canInstall(ctx)) UpdateRepo.install(ctx, apk)
             else UpdateRepo.openInstallSetting(ctx)
         }
+    }
+
+    /* 数据源编辑框：填自己的镜像（国内虚拟主机），留空就回内置的 GitHub。
+       放在 LazyColumn 外面 —— 塞进 item 里的话，列表一滚这一项被回收，框就跟着没了。 */
+    if (editSrc) {
+        AlertDialog(
+            onDismissRequest = { editSrc = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("数据源", fontSize = 16.sp) },
+            text = {
+                Column {
+                    Text(
+                        "留空 = 只用内置的 GitHub 源。\n" +
+                            "填了自己的镜像（比如 https://你的域名），App 会先问它，成功后就不再等 GitHub —— " +
+                            "国内直连 GitHub 常常要十几秒。\n" +
+                            "只填域名也行，会自动补成 …/api/app.json。",
+                        fontSize = 12.5.sp, lineHeight = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    TextField(
+                        value = srcDraft,
+                        onValueChange = { srcDraft = it.trim() },
+                        singleLine = true,
+                        placeholder = { Text("https://你的域名", fontSize = 13.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.updateDataMirror(srcDraft)
+                    editSrc = false
+                    vm.refresh()
+                }) { Text("保存并立即同步") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editSrc = false }) { Text("取消") }
+            }
+        )
     }
 
     /* 页头整块当列表第一个 item，往下滑跟着走，不钉在顶上（跟分享/文章/导航一致） */
@@ -440,10 +486,43 @@ fun SettingsScreen(
                     }
                     Text(
                         "上次同步 " + syncText(ui.lastSync) +
-                            (data?.let { " · 数据版本 " + it.build } ?: ""),
+                            (data?.let { " · 数据版本 " + it.build } ?: "") +
+                            (if (ui.source.isNotBlank()) " · 来自 " + ui.source else ""),
                         fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.height(6.dp))
+                    HairLine()
+                    Spacer(Modifier.height(6.dp))
+                    /* 数据源：内置是 GitHub Pages；国内直连慢的话，填自己的镜像让它排第一 */
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                srcDraft = prefs.dataMirror
+                                editSrc = true
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("数据源", fontSize = 14.sp)
+                            Text(
+                                if (prefs.dataMirror.isBlank())
+                                    "GitHub（内置，不用管）"
+                                else "自定义镜像：" + prefs.dataMirror,
+                                fontSize = 11.5.sp,
+                                maxLines = 2,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            "修改",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
 

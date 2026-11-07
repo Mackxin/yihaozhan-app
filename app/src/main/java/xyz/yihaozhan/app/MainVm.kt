@@ -21,7 +21,11 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         val refreshing: Boolean = false,
         val offline: Boolean = false,
         val error: String? = null,
-        val lastSync: Long = 0L
+        val lastSync: Long = 0L,
+        /* 这一次是从哪个域名拿到的（设置页显示，排查「内容怎么还是旧的」用） */
+        val source: String = "",
+        /* 手动刷新完给一句提示：「已是最新」/「已更新」。显示一次就清掉 */
+        val note: String? = null
     )
 
     /**
@@ -77,7 +81,24 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun refresh() = pull()
+    fun refresh() = pull(manual = true)
+
+    /**
+     * 回到前台时顺手对一次内容。
+     *
+     * 为什么要这一条：ViewModel 活着的时候 `boot()` 不会再跑 —— 早上打开过、晚上再切回来，
+     * 拿到的还是早上那份，用户就会觉得「App 不更新」。
+     * 节流 60 秒：锁屏解锁、切出去看一眼消息再回来，不该每次都发请求。
+     */
+    fun onForeground() {
+        if (!prefs.autoSync) return
+        if (System.currentTimeMillis() - lastPullAt < 60_000L) return
+        if (ui.data == null) return
+        pull()
+    }
+
+    /** 上次发起拉取的时刻，给 [onForeground] 做节流 */
+    private var lastPullAt = 0L
 
     /* ------------------------------ 自更新 ------------------------------ */
 
@@ -135,15 +156,24 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         upd = upd.copy(apk = null, progress = 0f, latest = null, error = null)
     }
 
-    private fun pull() {
+    /**
+     * 拉一次内容。
+     *
+     * manual = 用户主动点（下拉 / 设置里的按钮）：给一句「已是最新 / 已更新」的反馈，
+     * 否则转了两秒什么都没变，看着像没反应。自动拉（冷启动、回前台）就不打扰。
+     */
+    private fun pull(manual: Boolean = false) {
         if (ui.refreshing) return
+        lastPullAt = System.currentTimeMillis()
         viewModelScope.launch {
             val ctx = getApplication<Application>()
-            ui = ui.copy(refreshing = true, error = null)
-            val fresh = Repo.fetchRemote(ctx)
+            ui = ui.copy(refreshing = true, error = null, note = null)
+            val before = ui.data?.build.orEmpty()
+            val fresh = Repo.fetchRemote(ctx, prefs.dataMirror)
             /* 拉到新内容就顺手让桌面小组件重画一遍：不然它只能等系统那 30 分钟一次的更新，
                用户会觉得「小组件是死的」 */
             if (fresh != null) runCatching { Widget.refresh(ctx) }
+            val changed = fresh != null && fresh.build != before
             ui = if (fresh != null) {
                 ui.copy(
                     data = fresh,
@@ -151,7 +181,11 @@ class MainVm(app: Application) : AndroidViewModel(app) {
                     booting = false,
                     offline = false,
                     error = null,
-                    lastSync = System.currentTimeMillis()
+                    lastSync = System.currentTimeMillis(),
+                    source = Repo.lastSource,
+                    note = if (manual) {
+                        if (changed) "已更新到最新" else "已经是最新的了"
+                    } else null
                 )
             } else {
                 val has = ui.data != null
@@ -160,9 +194,15 @@ class MainVm(app: Application) : AndroidViewModel(app) {
                     booting = false,
                     offline = !has || !Repo.online(ctx),
                     error = if (has) null
-                    else "第一次打开需要联网一次\n联上之后整站就存进手机了，以后没网也能看"
+                    else "第一次打开需要联网一次\n联上之后整站就存进手机了，以后没网也能看",
+                    note = if (manual) "连不上，检查下网络再试" else null
                 )
             }
         }
+    }
+
+    /** 界面把提示显示掉了就清空，免得下次进设置又冒出来 */
+    fun clearNote() {
+        if (ui.note != null) ui = ui.copy(note = null)
     }
 }
