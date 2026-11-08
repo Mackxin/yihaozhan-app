@@ -109,6 +109,15 @@ fun UpdateDialog(
                         lineHeight = 21.sp,
                         color = pal.dim
                     )
+                    /* 上次断在半路：告诉他已经下了多少，免得以为要从头再来 */
+                    if (upd.progress > 0.01f) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "上次下到 " + (upd.progress * 100).toInt() + "%，接着下就行，不用从头来。",
+                            fontSize = 12.sp,
+                            color = pal.inkA3
+                        )
+                    }
                     if (upd.error != null) {
                         Spacer(Modifier.height(10.dp))
                         Text(upd.error ?: "", fontSize = 12.sp, color = pal.inkA2)
@@ -120,6 +129,7 @@ fun UpdateDialog(
             val label = when {
                 upd.downloading -> "下载中…"
                 upd.apk != null -> "去安装"
+                upd.progress > 0.01f -> "继续下载"
                 else -> "立即更新"
             }
             TextButton(
@@ -220,12 +230,13 @@ fun UpdateRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "发现 v" + info.versionName,
+                    "发现 v" + info.versionName +
+                        if (upd.progress > 0.01f) " · 已下 " + (upd.progress * 100).toInt() + "%" else "",
                     fontSize = 12.sp,
                     color = pal.inkA1,
                     modifier = Modifier.weight(1f)
                 )
-                MiniAction("更新", true, onDownload)
+                MiniAction(if (upd.progress > 0.01f) "继续" else "更新", true, onDownload)
             }
 
             else -> Row(

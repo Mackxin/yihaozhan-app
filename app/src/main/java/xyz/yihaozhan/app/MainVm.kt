@@ -111,12 +111,19 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             upd = upd.copy(checking = true, error = null)
             try {
-                val info = UpdateRepo.check(getApplication())
+                val ctx = getApplication<Application>()
+                val info = UpdateRepo.check(ctx)
                 val newer = info?.takeIf { it.versionCode > myCode }
+                /* 硬盘上还留着上次没下完的那半个包时，把进度摆上去 ——
+                   这样一进来就能看到「已下 42% · 继续」，而不是从 0 开始的样子 */
+                val part = if (newer != null && newer.size > 0) {
+                    (UpdateRepo.partialSize(ctx).toFloat() / newer.size).coerceIn(0f, 1f)
+                } else 0f
                 upd = upd.copy(
                     checking = false,
                     /* 拉不到（离线/超时）时保留上次查到的，但同样得比本机新才算 */
                     latest = newer ?: upd.latest?.takeIf { it.versionCode > myCode },
+                    progress = if (part > 0.01f) part else 0f,
                     error = if (!silent && info == null) "连不上，过会儿再试" else null
                 )
             } catch (e: Throwable) {
@@ -126,7 +133,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 下安装包，进度写进 upd.progress */
+    /** 下安装包，进度写进 upd.progress。断了再点时从残包的地方接着下 */
     fun downloadUpdate() {
         val info = upd.latest ?: return
         if (upd.downloading) return
@@ -137,14 +144,22 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch {
-            upd = upd.copy(downloading = true, progress = 0f, error = null, apk = null)
+            /* 有残包就从它的进度开局，界面不会先归零再跳上去 */
+            val have = UpdateRepo.partialSize(ctx)
+            val start = if (info.size > 0) (have.toFloat() / info.size).coerceIn(0f, 1f) else 0f
+            upd = upd.copy(downloading = true, progress = start, error = null, apk = null)
             val f = UpdateRepo.download(getApplication(), info) { p ->
                 upd = upd.copy(progress = p)
             }
             upd = if (f != null) {
                 upd.copy(downloading = false, progress = 1f, apk = f, error = null)
             } else {
-                upd.copy(downloading = false, progress = 0f, error = "下载失败，检查下网络再试")
+                /* 进度留在断点位置：按钮旁边能看出「已经下了多少」，下次接着下 */
+                upd.copy(
+                    downloading = false,
+                    progress = start,
+                    error = "下载中断了，再点一次会接着下"
+                )
             }
         }
     }
@@ -152,7 +167,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** 用户点了「稍后」：把这一版收起来，别一直杵着 */
     fun dismissUpdate() {
         if (upd.downloading) return
-        UpdateRepo.clearApk(getApplication())
+        /* 只有下完的整包才删；下到一半的残包留着，下次还能接着下 */
+        if (upd.apk != null) UpdateRepo.clearApk(getApplication())
         upd = upd.copy(apk = null, progress = 0f, latest = null, error = null)
     }
 

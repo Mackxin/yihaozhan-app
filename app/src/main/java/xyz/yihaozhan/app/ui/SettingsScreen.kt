@@ -40,7 +40,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -900,19 +903,18 @@ private fun Segmented(
 }
 
 /**
- * 底栏按钮的排序与显隐：**长按一行就能拖**，拖到哪儿哪儿就是它的新位置。
- * 原来那对上下箭头一次只能挪一格，五个 tab 想把最后一个顶到最前要点八下。
- *
- * 手势用 `detectDragGesturesAfterLongPress`：长按超过阈值才接管，
- * 平时按下去不会跟外面 LazyColumn 的滚动打架（它会 consume，父级就收不到）。
- */
-/**
  * 首页板块：长按一行直接拖动排序，右边开关决定露不露脸。
  *
  * 为什么分成「开着的（能拖）」「关掉的（不能拖）」两段：
  * `homeBlockList` 存的**就是开着的那串 key 的顺序**，关掉的根本不在表里 ——
  * 混在一起画的话，拖动时眼睛看到的落点和真实顺序对不上。分两段之后，
  * 上面随便拖，下面打开会接到末尾（再拖上去就是了）。
+ *
+ * 顺滑的两条关键（2.7.4 修的就是这个「一卡一卡」）：
+ *  1. **拖动过程中只改内存里的那份顺序**，松手才写一次 SharedPreferences。
+ *     以前每挪一格就 `moveHomeBlock` → 写盘 + 整页重组，手指一动就掉帧。
+ *  2. 每行用 `key(k)` 包起来。不包的话换位后 Compose 按「位置」认人，
+ *     手势会被重新挂到别的行上，越拖越飘、越飘越卡。
  */
 @Composable
 private fun HomeBlocksEditor(prefs: Prefs) {
@@ -923,13 +925,26 @@ private fun HomeBlocksEditor(prefs: Prefs) {
     var dragDy by remember { mutableStateOf(0f) }
 
     val labels = remember { Prefs.HOME_BLOCKS.toMap() }
-    val shown = prefs.homeBlockList
-    val hidden = Prefs.HOME_BLOCKS.map { it.first }.filter { it !in shown }
+    /* 拖动期间改的是这份，松手才落盘（见上面注释第 1 条） */
+    val order = remember { mutableStateListOf<String>().apply { addAll(prefs.homeBlockList) } }
+    /* 外面改了（拨开关、恢复备份）就同步回来；正在拖的时候别动，否则会被拽回原位 */
+    LaunchedEffect(prefs.homeBlocks, dragKey) {
+        if (dragKey == null) {
+            val fresh = prefs.homeBlockList
+            if (fresh != order.toList()) {
+                order.clear()
+                order.addAll(fresh)
+            }
+        }
+    }
+    /* 松手只写一次盘 */
+    val commit: () -> Unit = { prefs.updateHomeBlocks(order.toList()) }
+    val hidden = Prefs.HOME_BLOCKS.map { it.first }.filter { it !in order }
 
-    /** 一行：拖动手柄 + 名字 + 开关。show=false 就是「关掉的」那一段，不给拖 */
+    /** 一行：拖动手柄 + 名字 + 开关。on=false 就是「关掉的」那一段，不给拖 */
     @Composable
-    fun line(key: String, on: Boolean) {
-        val dragging = dragKey == key
+    fun line(k: String, on: Boolean) {
+        val dragging = dragKey == k
         Row(
             Modifier
                 .fillMaxWidth()
@@ -940,20 +955,24 @@ private fun HomeBlocksEditor(prefs: Prefs) {
                 .then(if (dragging) Modifier.background(pal.glassHi) else Modifier)
                 .then(
                     /* 关掉的不接拖动手势 —— 一处都不该动 */
-                    if (on) Modifier.pointerInput(key) {
+                    if (on) Modifier.pointerInput(k) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { dragKey = key; dragDy = 0f },
-                            onDragEnd = { dragKey = null; dragDy = 0f },
-                            onDragCancel = { dragKey = null; dragDy = 0f }
+                            onDragStart = { dragKey = k; dragDy = 0f },
+                            onDragEnd = { commit(); dragKey = null; dragDy = 0f },
+                            onDragCancel = { commit(); dragKey = null; dragDy = 0f }
                         ) { change, delta ->
                             change.consume()
                             dragDy += delta.y
-                            val cur = prefs.homeBlockList.indexOf(key)
-                            if (dragDy > step * 0.6f && cur in 0 until prefs.homeBlockList.lastIndex) {
-                                prefs.moveHomeBlock(key, 1)
+                            val cur = order.indexOf(k)
+                            if (cur < 0) return@detectDragGesturesAfterLongPress
+                            /* 过半行就真挪一格，并把 dragDy 抵掉一行 —— 否则手指和行会慢慢错位 */
+                            if (dragDy > step * 0.5f && cur < order.lastIndex) {
+                                order.removeAt(cur)
+                                order.add(cur + 1, k)
                                 dragDy -= step
-                            } else if (dragDy < -step * 0.6f && cur > 0) {
-                                prefs.moveHomeBlock(key, -1)
+                            } else if (dragDy < -step * 0.5f && cur > 0) {
+                                order.removeAt(cur)
+                                order.add(cur - 1, k)
                                 dragDy += step
                             }
                         }
@@ -965,23 +984,24 @@ private fun HomeBlocksEditor(prefs: Prefs) {
             Text("≡", fontSize = 16.sp, color = if (on) pal.mute else pal.mute.copy(alpha = 0.35f))
             Spacer(Modifier.width(10.dp))
             Text(
-                labels[key].orEmpty(),
+                labels[k].orEmpty(),
                 fontSize = 13.5.sp,
                 fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
                 color = if (on) pal.text else pal.mute,
                 modifier = Modifier.weight(1f)
             )
-            Switch(checked = on, onCheckedChange = { prefs.toggleHomeBlock(key) })
+            Switch(checked = on, onCheckedChange = { prefs.toggleHomeBlock(k) })
         }
     }
 
     Column(Modifier.fillMaxWidth()) {
-        shown.forEach { line(it, true) }
+        /* key(k)：换位时让 Compose 认「这一行」而不是「第几个位置」 */
+        order.forEach { k -> key(k) { line(k, true) } }
         if (hidden.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
             HairLine()
             Spacer(Modifier.height(4.dp))
-            hidden.forEach { line(it, false) }
+            hidden.forEach { k -> key(k) { line(k, false) } }
         }
         Text(
             "长按一行拖动换位置；开关决定它露不露脸。关掉的排在下面，重新打开会接在末尾。",
@@ -992,6 +1012,13 @@ private fun HomeBlocksEditor(prefs: Prefs) {
     }
 }
 
+/**
+ * 底栏按钮的排序与显隐：**长按一行就能拖**，拖到哪儿哪儿就是它的新位置。
+ *
+ * 跟首页板块同一套路（见 [HomeBlocksEditor]）：拖动只改内存顺序、松手落盘一次，
+ * 每行用 `key(id)` 包着走。手势用 `detectDragGesturesAfterLongPress`，
+ * 长按超过阈值才接管，平时按下去不会跟外面 LazyColumn 的滚动打架。
+ */
 @Composable
 private fun TabOrderEditor(prefs: Prefs) {
     val pal = LocalXyPal.current
@@ -1000,70 +1027,89 @@ private fun TabOrderEditor(prefs: Prefs) {
     var dragId by remember { mutableStateOf<Int?>(null) }
     var dragDy by remember { mutableStateOf(0f) }
 
+    val order = remember { mutableStateListOf<Int>().apply { addAll(prefs.tabsInOrder) } }
+    LaunchedEffect(prefs.tabOrder, dragId) {
+        if (dragId == null) {
+            val fresh = prefs.tabsInOrder
+            if (fresh != order.toList()) {
+                order.clear()
+                order.addAll(fresh)
+            }
+        }
+    }
+    val commit: () -> Unit = { prefs.setTabOrder(order.toList()) }
+
     Column(Modifier.fillMaxWidth()) {
-        prefs.tabsInOrder.forEach { id ->
-            val dragging = dragId == id
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(rowH)
-                    .zIndex(if (dragging) 2f else 0f)
-                    .offset { IntOffset(0, if (dragging) dragDy.roundToInt() else 0) }
-                    .clip(RoundedCornerShape(12.dp))
-                    .then(if (dragging) Modifier.background(pal.glassHi) else Modifier)
-                    .pointerInput(id) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                dragId = id
-                                dragDy = 0f
-                            },
-                            onDragEnd = {
-                                dragId = null
-                                dragDy = 0f
-                            },
-                            onDragCancel = {
-                                dragId = null
-                                dragDy = 0f
-                            }
-                        ) { change, delta ->
-                            change.consume()
-                            dragDy += delta.y
-                            val cur = prefs.tabsInOrder.indexOf(id)
-                            if (dragDy > step * 0.6f && cur < prefs.tabsInOrder.lastIndex) {
-                                prefs.moveTab(id, 1)
-                                dragDy -= step
-                            } else if (dragDy < -step * 0.6f && cur > 0) {
-                                prefs.moveTab(id, -1)
-                                dragDy += step
+        order.forEach { id ->
+            key(id) {
+                val dragging = dragId == id
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(rowH)
+                        .zIndex(if (dragging) 2f else 0f)
+                        .offset { IntOffset(0, if (dragging) dragDy.roundToInt() else 0) }
+                        .clip(RoundedCornerShape(12.dp))
+                        .then(if (dragging) Modifier.background(pal.glassHi) else Modifier)
+                        .pointerInput(id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    dragId = id
+                                    dragDy = 0f
+                                },
+                                onDragEnd = {
+                                    commit()
+                                    dragId = null
+                                    dragDy = 0f
+                                },
+                                onDragCancel = {
+                                    commit()
+                                    dragId = null
+                                    dragDy = 0f
+                                }
+                            ) { change, delta ->
+                                change.consume()
+                                dragDy += delta.y
+                                val cur = order.indexOf(id)
+                                if (cur < 0) return@detectDragGesturesAfterLongPress
+                                if (dragDy > step * 0.5f && cur < order.lastIndex) {
+                                    order.removeAt(cur)
+                                    order.add(cur + 1, id)
+                                    dragDy -= step
+                                } else if (dragDy < -step * 0.5f && cur > 0) {
+                                    order.removeAt(cur)
+                                    order.add(cur - 1, id)
+                                    dragDy += step
+                                }
                             }
                         }
-                    }
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("≡", fontSize = 16.sp, color = pal.mute)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    tabLabel(id),
-                    fontSize = 13.5.sp,
-                    fontWeight = if (id in prefs.hiddenSet) FontWeight.Normal else FontWeight.Medium,
-                    color = if (id in prefs.hiddenSet) pal.mute else pal.text,
-                    modifier = Modifier.weight(1f)
-                )
-                if (!prefs.canHide(id)) {
-                    /* 「设置」是回后台的唯一入口，藏了就再也改不回来 —— 干脆标成常驻 */
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("≡", fontSize = 16.sp, color = pal.mute)
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        if (id == Prefs.SETTINGS_TAB) "常驻" else "至少留一个",
-                        fontSize = 10.5.sp,
-                        color = pal.mute,
-                        modifier = Modifier.padding(end = 8.dp)
+                        tabLabel(id),
+                        fontSize = 13.5.sp,
+                        fontWeight = if (id in prefs.hiddenSet) FontWeight.Normal else FontWeight.Medium,
+                        color = if (id in prefs.hiddenSet) pal.mute else pal.text,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (!prefs.canHide(id)) {
+                        /* 「设置」是回后台的唯一入口，藏了就再也改不回来 —— 干脆标成常驻 */
+                        Text(
+                            if (id == Prefs.SETTINGS_TAB) "常驻" else "至少留一个",
+                            fontSize = 10.5.sp,
+                            color = pal.mute,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                    Switch(
+                        checked = id !in prefs.hiddenSet,
+                        enabled = prefs.canHide(id),
+                        onCheckedChange = { prefs.setTabHidden(id, !it) }
                     )
                 }
-                Switch(
-                    checked = id !in prefs.hiddenSet,
-                    enabled = prefs.canHide(id),
-                    onCheckedChange = { prefs.setTabHidden(id, !it) }
-                )
             }
         }
         Text(

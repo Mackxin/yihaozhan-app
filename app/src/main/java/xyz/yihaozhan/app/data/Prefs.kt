@@ -255,6 +255,12 @@ class Prefs private constructor(ctx: Context) {
         sp.edit().putString("tabOrder", tabOrder).apply()
     }
 
+    /** 一次性写回整份顺序。拖动结束时用：拖动过程中只在内存里挪，松手才落盘 */
+    fun setTabOrder(list: List<Int>) {
+        tabOrder = list.joinToString(",")
+        sp.edit().putString("tabOrder", tabOrder).apply()
+    }
+
     /** 显示 / 隐藏某个 tab。只剩一个时不许再隐藏，否则底栏就空了 */
     fun setTabHidden(id: Int, hidden: Boolean) {
         /* 「设置」永远不许藏：它是唯一能把这些开关改回来的地方，
