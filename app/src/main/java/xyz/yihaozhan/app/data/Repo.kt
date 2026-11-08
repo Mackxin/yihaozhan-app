@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -66,13 +67,40 @@ object Repo {
         add(JSDELIVR)
     }.distinct()
 
+    /**
+     * 同一份文件放在别处时的地址 —— 给更新包用。
+     *
+     * 镜像目录里通常也摆着 app-version.json / app.apk（`tools/deploy-ftp.py` 会一起传），
+     * 所以把 app.json 那段路径换掉就行。镜像没摆这两个文件时这里会 404，
+     * 调用方要顺着下一个源再试。
+     */
+    fun derive(from: String, fileName: String): String = from.replace("app.json", fileName)
+
     private val client by lazy {
         okhttp3.OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
-            .callTimeout(15, TimeUnit.SECONDS)
+            /* 2.7.5 起把超时压短：以前一个源卡满 15 秒才换下一个，
+               四个源串起来最坏要等一分钟，用户看到的就是「转圈半天」。
+               现在两个源同时发（见 [raceTexts]），单源 12 秒封顶。 */
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
             .build()
     }
+
+    /**
+     * 问镜像专用的 client，比 [client] 更急。
+     *
+     * 虚拟主机要是挂了这个地址，先等 12 秒再回落 GitHub，用户看着就是「卡住了」；
+     * 国内虚拟主机正常时 3 秒内就回，8 秒封顶足够。
+     */
+    private val mirrorClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
+            .callTimeout(8, TimeUnit.SECONDS)
+            .build()
+    }
+
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
 
@@ -100,10 +128,20 @@ object Repo {
     }
 
     /**
-     * 拉远端：按 [sources] 顺序试，谁先成功用谁。全失败返回 null（调用方保留缓存）。
+     * 拉远端。全失败返回 null（调用方保留缓存）。
      *
-     * `mirror` 是设置里填的自定义源，`preferMirror` 决定它排不排第一
-     * （空串或 false 就只用内置那三个）。
+     * 顺序分两种情形 —— 这个区别很重要，踩过：
+     *
+     * * **配了镜像** → 只问镜像，它不通才去 GitHub 那边比。
+     *   一开始把镜像和 Pages 放在一起竞速，结果 Pages 因为开了 gzip（161 KB）
+     *   反倒比虚拟主机（484 KB 没压缩）快，镜像白配了 —— 用户要的是「不依赖 GitHub」，
+     *   不是「快 0.1 秒」。
+     * * **没配镜像** → 前两个源同时发（Pages + raw），谁先回用谁，剩下的依次兜底。
+     *   串行时第一个源卡住就要等满一个超时，以前 15 秒，用户看到的就是「转圈半天」。
+     *
+     * 另外两个细节：
+     *   * jsDelivr **不参与竞速** —— 它按分支缓存十来小时，抢先把旧内容送来最坑；
+     *   * 只有最终胜出那一份会被写进缓存，并发写盘会互相截断。
      */
     suspend fun fetchRemote(
         ctx: Context,
@@ -114,43 +152,142 @@ object Repo {
             if (!online(ctx)) return@withContext null
             val t0 = System.currentTimeMillis()
             lastError = ""
-            for (u in sources(mirror, preferMirror)) {
-                val got = try {
-                    fetchOne(ctx, u)
+
+            val m = mirror.trim()
+            val hasMirror = preferMirror && m.isNotEmpty()
+            val all = sources(m, preferMirror)
+
+            var hit: Pair<String, String>? = null
+
+            if (hasMirror) {
+                hit = try {
+                    /* 镜像走自己的 client：虚拟主机挂掉时别陪着等满 12 秒 */
+                    mirrorClient.newCall(requestOf(m)).execute().use { resp ->
+                        if (!resp.isSuccessful) null
+                        else resp.body?.string()?.takeIf { it.length >= 32 }?.let { m to it }
+                    }
                 } catch (t: Throwable) {
-                    /* 一个源失败不该让整次同步失败，但**要留下原因** —— 不然后面只能猜
-                       「为什么还是旧数据」（国内几种典型：超时、证书、DNS、明文被拦） */
-                    lastError = hostOf(u) + "：" + (t.message ?: t.javaClass.simpleName)
-                    android.util.Log.w("XYRepo", "源失败 $u -> $lastError")
+                    lastError = hostOf(m) + "：" + (t.message ?: t.javaClass.simpleName)
                     null
                 }
-                if (got != null) {
-                    lastSource = hostOf(u)
-                    lastMs = System.currentTimeMillis() - t0
-                    return@withContext got
-                }
-                if (lastError.isBlank()) lastError = hostOf(u) + "：没拿到内容"
+                if (hit == null && lastError.isBlank()) lastError = hostOf(m) + "：镜像没给内容"
             }
+
+            if (hit == null) {
+                val rest = if (hasMirror) all.filter { it != m } else all
+                hit = raceTexts(rest.filter { it != JSDELIVR }.take(2))
+                if (hit == null) {
+                    for (u in rest) {
+                        val txt = try {
+                            fetchText(u)
+                        } catch (t: Throwable) {
+                            lastError = hostOf(u) + "：" + (t.message ?: t.javaClass.simpleName)
+                            null
+                        }
+                        if (txt != null) {
+                            hit = u to txt
+                            break
+                        }
+                        if (lastError.isBlank()) lastError = hostOf(u) + "：没拿到内容"
+                    }
+                }
+            }
+
+            val (winner, text) = hit ?: run {
+                lastMs = System.currentTimeMillis() - t0
+                return@withContext null
+            }
+
+            val payload = runCatching {
+                XYJson.decodeFromString<AppPayload>(text)
+            }.getOrNull()
+            if (payload == null || payload.isEmpty) {
+                lastError = hostOf(winner) + "：内容不是能用的 JSON"
+                lastMs = System.currentTimeMillis() - t0
+                return@withContext null
+            }
+
+            lastSource = hostOf(winner)
             lastMs = System.currentTimeMillis() - t0
-            null
+            /* 拉到的这份就是以后的缓存：下次冷启动先端它，秒开 */
+            runCatching { file(ctx).writeText(text) }
+            payload
         }
 
-    private fun fetchOne(ctx: Context, url: String): AppPayload? {
-        /* 加个时间戳：GitHub Pages / jsDelivr 的 CDN 都会缓存，
-           不带这个参数可能一直拿到旧文件，「打开即最新」就打折了 */
-        val req = okhttp3.Request.Builder()
+    /**
+     * 同时请求几个源，谁先给出像样的正文就用谁。
+     *
+     * 只回正文，**不碰磁盘** —— 写缓存留给调用方做一次，避免两个线程同时写同一个文件。
+     * 全失败 → 返回 null（Channel 被关掉，receive 抛异常）。
+     */
+    private suspend fun raceTexts(urls: List<String>): Pair<String, String>? =
+        withContext(Dispatchers.IO) {
+            if (urls.isEmpty()) return@withContext null
+            if (urls.size == 1) {
+                val u = urls[0]
+                return@withContext try {
+                    fetchText(u)?.let { u to it }
+                } catch (t: Throwable) {
+                    lastError = hostOf(u) + "：" + (t.message ?: t.javaClass.simpleName)
+                    null
+                }
+            }
+
+            val ch = Channel<Pair<String, String>>(Channel.UNLIMITED)
+            val calls = java.util.Collections.synchronizedList(mutableListOf<okhttp3.Call>())
+            val pending = java.util.concurrent.atomic.AtomicInteger(urls.size)
+            val lock = Any()
+
+            fun finish() {
+                synchronized(lock) { if (pending.decrementAndGet() == 0) ch.close() }
+            }
+
+            for (u in urls) {
+                val call = client.newCall(requestOf(u))
+                calls.add(call)
+                call.enqueue(object : okhttp3.Callback {
+                    override fun onFailure(c: okhttp3.Call, e: java.io.IOException) {
+                        lastError = hostOf(u) + "：" + (e.message ?: e.javaClass.simpleName)
+                        finish()
+                    }
+
+                    override fun onResponse(c: okhttp3.Call, resp: okhttp3.Response) {
+                        var text: String? = null
+                        try {
+                            if (resp.isSuccessful) text = resp.body?.string()
+                        } catch (_: Throwable) {
+                        } finally {
+                            runCatching { resp.close() }
+                        }
+                        if (text != null && text.length >= 32) ch.trySend(u to text)
+                        finish()
+                    }
+                })
+            }
+
+            val first = try {
+                ch.receive()
+            } catch (_: Throwable) {
+                null
+            }
+            /* 赢了就走，剩下的请求立刻掐掉 —— 不然还在那儿占着流量把 160 KB 下完 */
+            calls.forEach { runCatching { it.cancel() } }
+            ch.close()
+            first
+        }
+
+    private fun requestOf(url: String): okhttp3.Request =
+        okhttp3.Request.Builder()
             .url(if (url.contains("?")) url else "$url?t=" + System.currentTimeMillis())
             .header("Cache-Control", "no-cache")
             .build()
-        client.newCall(req).execute().use { resp ->
+
+    /** 同步取一份正文（长度不够 32 字节的当没拿到 —— 空的或 404 的 HTML） */
+    private fun fetchText(url: String): String? {
+        client.newCall(requestOf(url)).execute().use { resp ->
             if (!resp.isSuccessful) return null
             val text = resp.body?.string().orEmpty()
-            if (text.length < 32) return null
-            val payload = XYJson.decodeFromString<AppPayload>(text)
-            if (payload.isEmpty) return null
-            /* 拉到的这份就是以后的缓存：下次冷启动先端它，秒开 */
-            runCatching { file(ctx).writeText(text) }
-            return payload
+            return text.takeIf { it.length >= 32 }
         }
     }
 

@@ -112,7 +112,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             upd = upd.copy(checking = true, error = null)
             try {
                 val ctx = getApplication<Application>()
-                val info = UpdateRepo.check(ctx)
+                val info = UpdateRepo.check(ctx, prefs.dataMirror, prefs.preferMirror)
                 val newer = info?.takeIf { it.versionCode > myCode }
                 /* 硬盘上还留着上次没下完的那半个包时，把进度摆上去 ——
                    这样一进来就能看到「已下 42% · 继续」，而不是从 0 开始的样子 */
@@ -148,7 +148,9 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val have = UpdateRepo.partialSize(ctx)
             val start = if (info.size > 0) (have.toFloat() / info.size).coerceIn(0f, 1f) else 0f
             upd = upd.copy(downloading = true, progress = start, error = null, apk = null)
-            val f = UpdateRepo.download(getApplication(), info) { p ->
+            val f = UpdateRepo.download(
+                getApplication(), info, prefs.dataMirror, prefs.preferMirror
+            ) { p ->
                 upd = upd.copy(progress = p)
             }
             upd = if (f != null) {
