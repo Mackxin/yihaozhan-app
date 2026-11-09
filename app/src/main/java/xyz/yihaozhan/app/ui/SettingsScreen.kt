@@ -65,6 +65,7 @@ import xyz.yihaozhan.app.tabLabel
 import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.Repo
+import xyz.yihaozhan.app.data.ProbeResult
 import xyz.yihaozhan.app.data.UpdateRepo
 import kotlin.math.roundToInt
 
@@ -100,6 +101,11 @@ fun SettingsScreen(
     /* 自定义数据源：改之前把当前值抄进 draft，取消就丢掉 */
     var editSrc by remember { mutableStateOf(false) }
     var srcDraft by remember { mutableStateOf("") }
+    /* 「测一下」：地址存下来之后单独敲一次，看通不通、多快、是哪一版 */
+    var testing by remember { mutableStateOf(false) }
+    var probe by remember { mutableStateOf<ProbeResult?>(null) }
+    /* 地址一换，上次的测试结果就作废，不然会拿旧结论骗自己 */
+    LaunchedEffect(prefs.dataMirror) { probe = null }
     val version = remember {
         runCatching {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
@@ -532,6 +538,64 @@ fun SettingsScreen(
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                        /* 填完就地测一下 —— 不然只能「切过去 → 下拉刷新 → 看等多久」，
+                           连不上还得再切回来，试错成本太高。
+                           测的是地址本身，不写缓存、不改界面上的「来自 xxx」。 */
+                        if (prefs.dataMirror.isNotBlank()) {
+                            Spacer(Modifier.height(2.dp))
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val r = probe
+                                Text(
+                                    when {
+                                        testing -> "正在敲一下这个地址…"
+                                        r == null -> "地址填好了可以测一下，通了再切过来。"
+                                        r.ok -> "✓ 通了 · " + msText(r.ms) + " · 数据版本 " +
+                                            (r.build.ifBlank { "未知" }) + " · " + sizeText(r.bytes.toLong())
+                                        else -> "✗ 不通：" + r.msg + "（" + msText(r.ms) + "）"
+                                    },
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.weight(1f),
+                                    color = when {
+                                        r == null || testing -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        r.ok -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.error
+                                    }
+                                )
+                                Text(
+                                    if (testing) "测试中" else "测一下",
+                                    fontSize = 12.5.sp,
+                                    color = if (testing) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = !testing) {
+                                            testing = true
+                                            probe = null
+                                            scope.launch {
+                                                val res = Repo.probe(prefs.dataMirror)
+                                                probe = res
+                                                testing = false
+                                                /* 通了就顺手报个真实版本，别让人再去找 */
+                                                if (res.ok && res.build.isNotBlank() &&
+                                                    res.build != data?.build
+                                                ) {
+                                                    Toast.makeText(
+                                                        ctx,
+                                                        "镜像数据版本 " + res.build + "，当前显示 " +
+                                                            (data?.build ?: "无"),
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1176,6 +1240,13 @@ private fun sizeText(bytes: Long): String = when {
     bytes <= 0L -> "0 KB"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> String.format("%.1f MB", bytes / 1024f / 1024f)
+}
+
+/* 测试耗时的说法：几百毫秒就直接报数值，超过一秒换算成秒 */
+private fun msText(ms: Long): String = when {
+    ms <= 0L -> "—"
+    ms < 1000L -> "$ms 毫秒"
+    else -> String.format("%.1f 秒", ms / 1000f)
 }
 
 private fun syncText(ts: Long): String {

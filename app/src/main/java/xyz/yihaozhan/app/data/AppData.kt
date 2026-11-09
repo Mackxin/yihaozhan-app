@@ -212,7 +212,9 @@ data class LinkItem(
     val icon: String = "",
     val desc: String = "",
     /* 站点后台给单个站点设的「置顶」：网页端 sortPinned() 用，App 排序照样跟 */
-    val pin: Boolean = false
+    val pin: Boolean = false,
+    /* 在 App 里打开这条链接时要不要留底部标签栏。后台可关，默认开着 */
+    val dock: Boolean = true
 )
 
 @Serializable

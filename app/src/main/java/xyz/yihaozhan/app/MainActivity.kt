@@ -317,6 +317,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
 
     /* 站外链接：默认 App 内预览；设置里关掉「链接在 App 内打开」就直接丢给浏览器 */
     val external = rememberOpener()
+    /* 「这条链接在 App 里打开时要不要留底栏」——后台可以逐条关（默认开）。
+       做成 url -> dock 的查找表，open() 里就近查一次就行，
+       不用把这个开关一层层穿到导航页、首页卡片那些调用点上。 */
+    val dockByUrl = remember(data) {
+        val m = HashMap<String, Boolean>()
+        data?.cats?.forEach { c -> c.links.forEach { l -> m[l.url] = l.dock } }
+        m
+    }
+    var webDock by rememberSaveable { mutableStateOf(true) }
     val open: (String) -> Unit = { u ->
         if (u.isNotBlank()) {
             /* 导航页那条「本地音乐」在 app.json 里是完整网址（…/#/music）。
@@ -332,6 +341,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             } else if (isMusicUrl(u)) {
                 musicOpen = true
             } else if (prefs.linkInApp) {
+                /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
+                   裸网址）一律按默认开着 */
+                webDock = dockByUrl[u] ?: dockByUrl[u.trimEnd('/')] ?: true
                 webUrl = u
             } else {
                 external(u)
@@ -507,12 +519,13 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
                 containerColor = Color.Transparent,
                 bottomBar = {
-                    /* 底栏只在「站外网页预览」时**一定**让位。
+                    /* 底栏在「站外网页预览」时让位 —— 但后台给那条链接开了「显示底栏」就留着
+                       （2.7.6 新增：逐条可控，默认开着）。
                        阅读页看设置：`dockInReader` 打开就留着（2.6.9 新增的开关），
                        关着就是原样整屏看正文。
                        内置页（灵感随记 / 关于 / 足迹 / 手册 / 版本更新 / 本地音乐）一律留着底栏 ——
                        用户明确要求：「之后要是还有内置页面都要显示 tab 栏出来」。 */
-                    if (webUrl == null && (openPost == null || prefs.dockInReader)) {
+                    if ((webUrl == null || webDock) && (openPost == null || prefs.dockInReader)) {
                         BottomDock(
                             position = dockPos,
                             current = curId,

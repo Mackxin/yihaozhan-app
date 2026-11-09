@@ -44,6 +44,8 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Toc
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -651,19 +653,39 @@ fun PostDetailScreen(
             }
         }
 
-        /* 右下角两颗浮动小圆：回顶（滚下去才出现）和目录（有标题才出现） */
-        Column(
-            Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.End
-        ) {
-            if (scrolled) {
-                RoundBtn(Icons.Rounded.VerticalAlignTop, "回到顶部") {
-                    scope.launch { listState.animateScrollToItem(0) }
+        /* 右下角浮动胶囊：回顶（滚下去才出现）+ 目录（有标题才出现）。
+           2.7.6 把原来两颗独立圆球合成一条胶囊 —— 一格一件、中间一条 hairline，
+           只剩一件时自动收成单圆。两颗球叠在一起太闹，一条更安静。 */
+        val canTop = scrolled
+        val canToc = toc.isNotEmpty()
+        if (canTop || canToc) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 14.dp, bottom = 22.dp)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(pal.glass)
+                    /* 一道发丝描边：深色底下玻璃色跟背景只差一点点，没这条边整个胶囊会糊在背景里 */
+                    .border(BorderStroke(1.dp, pal.outline), RoundedCornerShape(99.dp))
+                    .enterPop(180),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (canTop) {
+                    FloatSlot(Icons.Rounded.KeyboardArrowUp, "回到顶部") {
+                        scope.launch { listState.animateScrollToItem(0) }
+                    }
                 }
-            }
-            if (toc.isNotEmpty()) {
-                RoundBtn(Icons.AutoMirrored.Rounded.List, "文章目录") { showToc = true }
+                if (canTop && canToc) {
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .height(18.dp)
+                            .background(pal.outline)
+                    )
+                }
+                if (canToc) {
+                    FloatSlot(Icons.Rounded.Toc, "文章目录") { showToc = true }
+                }
             }
         }
 
@@ -878,10 +900,12 @@ private fun BarIcon(
     }
 }
 
-/** 阅读页右下角那两颗玻璃小圆（回顶 / 目录）。列表页那颗独立的回顶圆钮 2.6.4 已删，
-    回顶改成点顶栏的「壹号栈」；阅读页没有底栏也没有顶栏品牌，所以这组留着。 */
+/** 阅读页右下角浮动胶囊里的一格（回顶 / 目录）。
+    列表页那颗独立的回顶圆钮 2.6.4 已删，回顶改成点顶栏的「壹号栈」；
+    阅读页没有底栏也没有顶栏品牌，所以这组留着。
+    2.7.6 起不再自己画圈——外框由外层胶囊负责，这里只是一格可点的图标。 */
 @Composable
-private fun RoundBtn(
+private fun FloatSlot(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     desc: String,
     onClick: () -> Unit
@@ -889,11 +913,7 @@ private fun RoundBtn(
     val pal = LocalXyPal.current
     Box(
         Modifier
-            .size(42.dp)
-            .clip(RoundedCornerShape(99.dp))
-            .background(pal.glass)
-            .border(BorderStroke(1.dp, pal.glassHi), RoundedCornerShape(99.dp))
-            .enterPop(180)
+            .size(width = 46.dp, height = 42.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null

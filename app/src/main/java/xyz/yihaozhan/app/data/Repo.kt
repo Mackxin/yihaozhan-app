@@ -12,6 +12,23 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
+ * 「测一下」的结果：这个地址通不通、多快、里面是哪一版。
+ *
+ * 只用来回答「我填的镜像地址对不对」，不参与真正的取数流程。
+ */
+data class ProbeResult(
+    val ok: Boolean = false,
+    /** 从发请求到收完正文花了多久（毫秒） */
+    val ms: Long = 0,
+    /** 那份 app.json 里的数据版本，能跟站点对上就说明不是旧副本 */
+    val build: String = "",
+    /** 正文大小（字节），国内虚拟主机没开 gzip，这个数会比 GitHub 大不少，正常 */
+    val bytes: Int = 0,
+    /** 失败原因，给人看的一句话 */
+    val msg: String = ""
+)
+
+/**
  * 数据仓库：远端拉一份、本地存一份。
  *
  * 「每次打开就是最新的」怎么做到的：
@@ -103,6 +120,37 @@ object Repo {
 
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
+
+    /**
+     * 单独敲一下某个地址 —— 设置里那个「测一下」用的。
+     *
+     * 跟 [fetchRemote] 的区别：**只问这一个地址**，不回落、不写缓存、不动 [lastSource]。
+     * 一次测试要是把界面上的「来自 xxx」改掉了，反而更难判断。
+     */
+    suspend fun probe(url: String): ProbeResult = withContext(Dispatchers.IO) {
+        val u = url.trim()
+        if (u.isEmpty()) return@withContext ProbeResult(msg = "地址是空的")
+        val t0 = System.currentTimeMillis()
+        try {
+            /* 跟镜像同一条急脾气通道：正常 3 秒内就回，8 秒封顶，别让人干等 */
+            mirrorClient.newCall(requestOf(u)).execute().use { resp ->
+                /* 先拿字节再解码：报告里那个「多大」要按真实字节数说，
+                   String.length 数的是字符，中文一多能虚报出几十 KB */
+                val raw = resp.body?.bytes()
+                val body = raw?.toString(Charsets.UTF_8).orEmpty()
+                val ms = System.currentTimeMillis() - t0
+                if (!resp.isSuccessful) return@withContext ProbeResult(ms = ms, msg = "HTTP " + resp.code)
+                if (body.length < 32) return@withContext ProbeResult(ms = ms, msg = "连上了，但内容太短")
+                val p = runCatching { XYJson.decodeFromString<AppPayload>(body) }.getOrNull()
+                if (p == null || p.isEmpty) {
+                    return@withContext ProbeResult(ms = ms, bytes = raw?.size ?: 0, msg = "不是能用的 app.json")
+                }
+                ProbeResult(true, ms, p.build, raw?.size ?: 0, "")
+            }
+        } catch (t: Throwable) {
+            ProbeResult(ms = System.currentTimeMillis() - t0, msg = t.message ?: t.javaClass.simpleName)
+        }
+    }
 
     /** 本地缓存。第一次装没有 → null */
     suspend fun loadCache(ctx: Context): AppPayload? = withContext(Dispatchers.IO) {
