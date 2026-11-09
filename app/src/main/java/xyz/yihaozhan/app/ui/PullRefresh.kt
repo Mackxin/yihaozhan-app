@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -41,7 +40,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -54,6 +52,7 @@ import kotlin.math.roundToInt
  *
  * 手势走 `nestedScroll`：列表自己还能滚的时候轮不到这里，滚到顶继续拉才被接管。
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PullRefresh(
     refreshing: Boolean,
@@ -61,7 +60,6 @@ fun PullRefresh(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val pal = LocalXyPal.current
     val density = LocalDensity.current
     val threshold = with(density) { 66.dp.toPx() }
     val hold = with(density) { 58.dp.toPx() }
@@ -90,6 +88,27 @@ fun PullRefresh(
                     val used = (-available.y).coerceAtMost(pull)
                     pull -= used
                     return Offset(0f, -used)
+                }
+                return Offset.Zero
+            }
+
+            /*
+             * 关键的一条（2.7.8 修）：以前只靠下面那层 pointerInput 兜底，
+             * 可列表一旦开始滚，它会先把拖动事件消费掉（`change.isConsumed` 为真），
+             * 兜底那层就整个跳过 —— 真机上「下拉刷新没反应」就是这么来的。
+             *
+             * 这里接 onPostScroll：子列表消费完还剩多少（`available`）就归我们。
+             * 列表已经在顶部还继续往下拖时，剩余量才是正的，正好是那个时机。
+             */
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (available.y > 0f && !currentRefreshing) {
+                    pull = (pull + available.y * 0.55f).coerceAtMost(threshold * 1.55f)
+                    /* 说「我吃掉了」，列表才不会同时起一段回弹 */
+                    return Offset(0f, available.y)
                 }
                 return Offset.Zero
             }
@@ -136,7 +155,16 @@ fun PullRefresh(
     ) {
         /* 内容按实际下拉距离往下走：顶部就露出一段空当，指示器待在里面，不会压到标题 */
         Box(Modifier.fillMaxSize().offset { IntOffset(0, pull.roundToInt()) }) {
-            content()
+            /*
+             * 关掉列表自带的「拉伸回弹」（Android 12+ 的 stretch overscroll）：
+             * 它会把列表到顶后剩下的那段拖动**自己吃干**，`onPostScroll` 就只拿到 0，
+             * 下拉刷新永远不触发。在需要下拉刷新的页面上，这段位移交给上面那颗指示器更值。
+             */
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.LocalOverscrollConfiguration provides null
+            ) {
+                content()
+            }
         }
 
         if (pull > 1f) {

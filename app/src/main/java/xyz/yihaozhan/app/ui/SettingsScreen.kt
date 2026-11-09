@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.Check
@@ -37,7 +38,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -97,6 +97,9 @@ fun SettingsScreen(
     val ui = vm.ui
     val data = ui.data
     val ctx = LocalContext.current
+    /* 这个文件里各处都是 LocalXyPal.current.xxx 就地取，只有数据源那个弹窗要一整串配色，
+       单独取一份省得每行都写一遍 */
+    val pal = LocalXyPal.current
     var cacheSize by remember(data, ui.lastSync) { mutableStateOf(Repo.cacheSize(ctx)) }
     /* 自定义数据源：改之前把当前值抄进 draft，取消就丢掉 */
     var editSrc by remember { mutableStateOf(false) }
@@ -171,8 +174,11 @@ fun SettingsScreen(
     if (editSrc) {
         AlertDialog(
             onDismissRequest = { editSrc = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text("数据源", fontSize = 16.sp) },
+            /* 2.7.8：以前这里用 MaterialTheme.colorScheme.surface —— 那色在深色主题下几乎是透明的，
+               弹出来能透见底下的列表和底栏，字全糊在一起（真机上根本看不清）。
+               改成跟全站其他对话框一致的 bgSoft，输入框也换成自绘玻璃底。 */
+            containerColor = pal.bgSoft,
+            title = { Text("数据源", fontSize = 16.sp, color = pal.text) },
             text = {
                 Column {
                     Text(
@@ -181,17 +187,33 @@ fun SettingsScreen(
                             "只填域名也可以，会自动补成 …/api/app.json。\n" +
                             "留空 = 关掉镜像，只用内置的 GitHub。",
                         fontSize = 12.5.sp, lineHeight = 20.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = pal.dim
                     )
                     Spacer(Modifier.height(10.dp))
-                    TextField(
-                        value = srcDraft,
-                        onValueChange = { srcDraft = it.trim() },
-                        singleLine = true,
-                        placeholder = { Text("https://你的域名", fontSize = 13.sp) },
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(pal.glassHi)
+                            .padding(horizontal = 12.dp, vertical = 11.dp)
+                    ) {
+                        BasicTextField(
+                            value = srcDraft,
+                            onValueChange = { srcDraft = it.trim() },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 13.sp, color = pal.text
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(pal.inkA1),
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                if (srcDraft.isEmpty()) {
+                                    Text("https://你的域名", fontSize = 13.sp, color = pal.mute)
+                                }
+                                inner()
+                            }
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -202,10 +224,10 @@ fun SettingsScreen(
                     if (srcDraft.isNotBlank()) prefs.updatePreferMirror(true)
                     editSrc = false
                     vm.refresh()
-                }) { Text("保存并立即同步") }
+                }) { Text("保存并立即同步", color = pal.inkA1) }
             },
             dismissButton = {
-                TextButton(onClick = { editSrc = false }) { Text("取消") }
+                TextButton(onClick = { editSrc = false }) { Text("取消", color = pal.mute) }
             }
         )
     }

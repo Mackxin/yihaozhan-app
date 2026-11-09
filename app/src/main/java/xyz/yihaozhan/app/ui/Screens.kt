@@ -3,7 +3,6 @@ package xyz.yihaozhan.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,16 +41,10 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Toc
 import androidx.compose.material.icons.rounded.ArrowOutward
-import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.MoreHoriz
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -72,7 +64,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
@@ -81,7 +72,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import xyz.yihaozhan.app.MainVm
 import xyz.yihaozhan.app.data.AppPayload
 import xyz.yihaozhan.app.data.Cat
 import xyz.yihaozhan.app.data.Local
@@ -1082,6 +1072,13 @@ fun LinksScreen(
         foldedIds = if (open) emptySet() else groups.map { it.first.id }.toSet()
     }
 
+    /* 同时展开好几个分类时（默认的「全部展开」、或者搜索命中多个），
+       标签云会一段接一段地堆着 —— 不给个标题就分不清哪片属于哪个分类。
+       只展开一个时不加（格子自己亮着、内容紧跟其下，再加一行反而啰嗦）。 */
+    val manyOpen = remember(groups, foldedIds, searching) {
+        if (searching) groups.size > 1 else groups.count { it.first.id !in foldedIds } > 1
+    }
+
     /* 全展开还是全折叠，一个按钮切；文案跟着当前状态变，点一下就是「另一头」 */
     val allOpen = groups.isNotEmpty() && groups.all { isOpen(it.first.id) }
     val toggleAll: () -> Unit = { setAll(!allOpen) }
@@ -1129,10 +1126,13 @@ fun LinksScreen(
                     onTitleClick = { if (!searching) toggleAll() },
                     /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
                     side = {
-                        Row(
+                        /* 用 FlowRow 而不是 Row：真机（窄屏 + 系统字号调大）上
+                           「共 2079 个站点 · 50 个分类 + 两颗胶囊」一行根本塞不下，
+                           Row 会把文字压扁到只剩一个「全」字。FlowRow 装不下就自己换行。 */
+                        FlowRow(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
                             /* 两千个站点，翻十年也翻不到底 —— 让骰子替人挑一个。
@@ -1209,25 +1209,47 @@ fun LinksScreen(
                     }
                     item(key = "recent-gap") { Spacer(Modifier.height(12.dp)) }
                 }
-                groups.forEach { (cat, links) ->
-                    item(key = "H|" + cat.id) {
-                        CatHeader(
-                            /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
-                            icon = if (data.nav.catIcon) cat.icon else "",
-                            name = cat.name,
-                            /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
-                            count = if (data.nav.count) links.size else -1,
-                            open = isOpen(cat.id),
-                            locked = searching,
-                            /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
-                            onToggle = {
-                                foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
-                                else foldedIds + cat.id
+                /* 3 列网格（2.7.8）：以前一行一个分类，一屏只看得见七八个，五十类要翻半天。
+                   现在每行最多三个格子；数字紧跟分类名，折叠箭头去掉 —— 点格子就是展开 / 收起。 */
+                groups.chunked(3).forEach { row ->
+                    item(key = "H|" + row.joinToString("|") { it.first.id }) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            row.forEach { (cat, links) ->
+                                CatCell(
+                                    /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
+                                    icon = if (data.nav.catIcon) cat.icon else "",
+                                    name = cat.name,
+                                    /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
+                                    count = if (data.nav.count) links.size else -1,
+                                    open = isOpen(cat.id),
+                                    locked = searching,
+                                    modifier = Modifier.weight(1f),
+                                    /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
+                                    onClick = {
+                                        foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
+                                        else foldedIds + cat.id
+                                    }
+                                )
                             }
-                        )
+                            /* 凑不满三个时补空位，别让剩下的格子被拉宽 */
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
-                    if (isOpen(cat.id)) {
+                    /* 展开的分类，站点块紧跟在这一行格子下面，顺序才不乱 */
+                    row.filter { isOpen(it.first.id) }.forEach { (cat, links) ->
                         item(key = "B|" + cat.id) {
+                            if (manyOpen) {
+                                Text(
+                                    "· " + cat.name,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = pal.mute,
+                                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                                )
+                            }
                             /* 「显示项 → 介绍」开着就一行一个（名字 + 介绍），
                                否则还是标签云 —— 跟网页端「卡片列表 / 紧凑标签」两种密度对得上 */
                             if (data.nav.desc) {
@@ -1268,7 +1290,9 @@ fun LinksScreen(
                             }
                         }
                     }
-                    item(key = "S|" + cat.id) { Spacer(Modifier.height(12.dp)) }
+                    item(key = "S|" + row.joinToString("-") { it.first.id }) {
+                        Spacer(Modifier.height(10.dp))
+                    }
                 }
         }
     }
@@ -1313,64 +1337,55 @@ fun LinksScreen(
 }
 
 /**
- * 分类标题条：图标 + 名字 + 站点数 + 一个会转的箭头。
- * 整条都能点（箭头那么小，只有点得中才有鬼）。
+ * 分类格子（2.7.8 从「一行一个标题」改成三列网格里的一个）。
+ *
+ * 一个格子 = 图标 + 分类名 + 站点数，**数字紧跟着名字**（以前靠右对齐，眼睛要从左扫到右），
+ * 右侧那个会转的箭头去掉了 —— 格子本身就是按钮，点一下展开、再点收起。
+ * 展开态用 `glassHi` 提一档底色，一眼能看出哪些正开着。
  */
 @Composable
-private fun CatHeader(
+private fun CatCell(
     icon: String,
     name: String,
     count: Int,
     open: Boolean,
     locked: Boolean,
-    onToggle: () -> Unit
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
 ) {
     val pal = LocalXyPal.current
-    val rot by animateFloatAsState(if (open) 180f else 0f, label = "nav-chev")
-
     Row(
-        Modifier
-            .fillMaxWidth()
-            /* 不铺底色：分类是「小标题」，卡片才是内容块。
-               跟分享页那种日期小标题一个语言，一眼能分开层级 */
-            .clip(RoundedCornerShape(10.dp))
+        modifier
+            .height(42.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (open) pal.glassHi else pal.glass)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 enabled = !locked
-            ) { onToggle() }
-            .padding(horizontal = 4.dp, vertical = 7.dp),
+            ) { onClick() }
+            .padding(horizontal = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        /* 站点后台「显示项 → 分类图标」关着就整块不画（网页端也是纯文字小标题），
-           开着但这一类本来就配了 emoji 才显示 */
+        /* 站点后台「显示项 → 分类图标」关着就整块不画（网页端也是纯文字小标题） */
         if (icon.isNotBlank()) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(icon, fontSize = 13.sp)
-            }
-            Spacer(Modifier.width(9.dp))
+            Text(icon, fontSize = 12.sp)
+            Spacer(Modifier.width(4.dp))
         }
         Text(
-            name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+            name,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = pal.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            /* fill = false：名字短的时候只占自己那么宽，数字才能紧贴在它后面；
+               名字长则被压缩成省略号，数字照样看得见 */
+            modifier = Modifier.weight(1f, fill = false)
         )
-        if (count >= 0) Text("$count", fontSize = 11.sp, color = pal.mute)
-        if (!locked) {
-            Spacer(Modifier.width(2.dp))
-            Icon(
-                Icons.Rounded.KeyboardArrowDown, "展开或折叠",
-                tint = pal.mute,
-                modifier = Modifier
-                    .size(20.dp)
-                    .rotate(rot)
-            )
+        if (count >= 0) {
+            Spacer(Modifier.width(5.dp))
+            Text("$count", fontSize = 10.5.sp, color = pal.mute, maxLines = 1)
         }
     }
 }

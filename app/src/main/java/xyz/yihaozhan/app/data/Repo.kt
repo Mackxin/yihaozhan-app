@@ -93,6 +93,55 @@ object Repo {
      */
     fun derive(from: String, fileName: String): String = from.replace("app.json", fileName)
 
+    /**
+     * 镜像上那份「压过的 app.json」的地址。
+     *
+     * 国内虚拟主机（IIS 共享版）不让开 gzip 压缩，489 KB 原样传；GitHub Pages 压到 163 KB，
+     * 于是同一台机器上镜像反而慢 3~5 倍。解决办法是把文件本身压一份放旁边：
+     * `tools/deploy-ftp.py` 会生成 `api/app.json.gz`，App 这边先取它，看到 gzip 魔数就自己解。
+     * 老版本 APK 不认识这个文件名、根本不会来取，所以这条路对它们是零影响的。
+     */
+    private fun gzUrl(u: String): String = if (u.endsWith(".gz")) u else u + ".gz"
+
+    /**
+     * 把响应读成文本：**看到 gzip 魔数就自己解压**。
+     *
+     * 不能只靠 OkHttp 的自动解压 —— 那只认 `Content-Encoding: gzip` 响应头；
+     * 我们这份是「文件本身是 gz」，服务器只会给 `application/gzip`。
+     */
+    private fun bodyText(resp: okhttp3.Response): String? {
+        val raw = resp.body?.bytes() ?: return null
+        return String(plainBytes(raw), Charsets.UTF_8)
+    }
+
+    /** 是 gzip 就解开，不是就原样返回（服务端有没有真的带上 gzip 都不影响） */
+    private fun plainBytes(raw: ByteArray): ByteArray =
+        if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) {
+            runCatching {
+                java.util.zip.GZIPInputStream(raw.inputStream()).use { it.readBytes() }
+            }.getOrDefault(raw)
+        } else raw
+
+    /**
+     * 问镜像要数据：**先试 .gz，没有再退回原文件**。
+     *
+     * 多花一次 404 的往返（几十毫秒），换掉的是 326 KB 的下载量 —— 值。
+     */
+    private fun fetchMirrorJson(url: String): String? {
+        for (u in listOf(gzUrl(url), url)) {
+            try {
+                mirrorClient.newCall(requestOf(u)).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val t = bodyText(resp)
+                    if (t != null && t.length >= 32) return t
+                }
+            } catch (t: Throwable) {
+                /* 换下一个候选；两个都挂才由调用方报错 */
+            }
+        }
+        return null
+    }
+
     private val client by lazy {
         okhttp3.OkHttpClient.Builder()
             /* 2.7.5 起把超时压短：以前一个源卡满 15 秒才换下一个，
@@ -131,25 +180,44 @@ object Repo {
         val u = url.trim()
         if (u.isEmpty()) return@withContext ProbeResult(msg = "地址是空的")
         val t0 = System.currentTimeMillis()
-        try {
-            /* 跟镜像同一条急脾气通道：正常 3 秒内就回，8 秒封顶，别让人干等 */
-            mirrorClient.newCall(requestOf(u)).execute().use { resp ->
-                /* 先拿字节再解码：报告里那个「多大」要按真实字节数说，
-                   String.length 数的是字符，中文一多能虚报出几十 KB */
-                val raw = resp.body?.bytes()
-                val body = raw?.toString(Charsets.UTF_8).orEmpty()
-                val ms = System.currentTimeMillis() - t0
-                if (!resp.isSuccessful) return@withContext ProbeResult(ms = ms, msg = "HTTP " + resp.code)
-                if (body.length < 32) return@withContext ProbeResult(ms = ms, msg = "连上了，但内容太短")
-                val p = runCatching { XYJson.decodeFromString<AppPayload>(body) }.getOrNull()
-                if (p == null || p.isEmpty) {
-                    return@withContext ProbeResult(ms = ms, bytes = raw?.size ?: 0, msg = "不是能用的 app.json")
+        /* 跟真正取数同一个顺序：先试 app.json.gz，没有再退回原文件。
+           不然「测一下」量的是 489 KB 那份（4 秒），实际取数只用 1 秒，报告反而误导人。 */
+        var lastCode = 0        /* 两个候选都没成时，至少要知道是不是 404 */
+        for (cand in listOf(gzUrl(u), u)) {
+            try {
+                /* 跟镜像同一条急脾气通道：正常 3 秒内就回，8 秒封顶，别让人干等 */
+                mirrorClient.newCall(requestOf(cand)).execute().use { resp ->
+                    if (!resp.isSuccessful) { lastCode = resp.code; return@use }
+                    /* 先拿字节再解码：报告里那个「多大」要按真实字节数说，
+                       String.length 数的是字符，中文一多能虚报出几十 KB */
+                    val raw = resp.body?.bytes()
+                    val plain = if (raw == null) null else plainBytes(raw)
+                    val body = if (plain == null) "" else String(plain, Charsets.UTF_8)
+                    val ms = System.currentTimeMillis() - t0
+                    if (body.length < 32) return@withContext ProbeResult(ms = ms, msg = "连上了，但内容太短")
+                    val p = runCatching { XYJson.decodeFromString<AppPayload>(body) }.getOrNull()
+                    /* 报的是解压后的正文大小（跟仓库里那份对得上），传了多少字节不写进界面，
+                       免得「怎么才 162 KB」跟 app.json 对不上 */
+                    val size = plain?.size ?: 0
+                    if (p == null || p.isEmpty) {
+                        return@withContext ProbeResult(ms = ms, bytes = size, msg = "不是能用的 app.json")
+                    }
+                    return@withContext ProbeResult(true, ms, p.build, size, "")
                 }
-                ProbeResult(true, ms, p.build, raw?.size ?: 0, "")
+            } catch (t: Throwable) {
+                /* 这个候选不通，换下一个；两个都不通才把异常报出去 */
+                if (cand == u) {
+                    return@withContext ProbeResult(
+                        ms = System.currentTimeMillis() - t0,
+                        msg = t.message ?: t.javaClass.simpleName
+                    )
+                }
             }
-        } catch (t: Throwable) {
-            ProbeResult(ms = System.currentTimeMillis() - t0, msg = t.message ?: t.javaClass.simpleName)
         }
+        ProbeResult(
+            ms = System.currentTimeMillis() - t0,
+            msg = if (lastCode > 0) "HTTP " + lastCode else "连上了，但没拿到内容"
+        )
     }
 
     /** 本地缓存。第一次装没有 → null */
@@ -209,11 +277,9 @@ object Repo {
 
             if (hasMirror) {
                 hit = try {
-                    /* 镜像走自己的 client：虚拟主机挂掉时别陪着等满 12 秒 */
-                    mirrorClient.newCall(requestOf(m)).execute().use { resp ->
-                        if (!resp.isSuccessful) null
-                        else resp.body?.string()?.takeIf { it.length >= 32 }?.let { m to it }
-                    }
+                    /* 镜像走自己的 client：虚拟主机挂掉时别陪着等满 12 秒。
+                       内部先试 app.json.gz（体积只有 1/3），没有再退回原文件 */
+                    fetchMirrorJson(m)?.let { m to it }
                 } catch (t: Throwable) {
                     lastError = hostOf(m) + "：" + (t.message ?: t.javaClass.simpleName)
                     null

@@ -34,7 +34,6 @@ import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Refresh
@@ -96,6 +95,7 @@ import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.MusicScreen
 import xyz.yihaozhan.app.ui.NoteScreen
 import xyz.yihaozhan.app.ui.PickItem
+import xyz.yihaozhan.app.ui.RefreshTip
 import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
 import xyz.yihaozhan.app.ui.PullRefresh
@@ -110,8 +110,6 @@ import xyz.yihaozhan.app.ui.WebScreen
 import xyz.yihaozhan.app.ui.YiTheme
 import xyz.yihaozhan.app.ui.toggleEnd
 import xyz.yihaozhan.app.ui.rememberOpener
-import xyz.yihaozhan.app.ui.enterFade
-import xyz.yihaozhan.app.ui.enterPop
 import xyz.yihaozhan.app.ui.enterRise
 import xyz.yihaozhan.app.ui.orderedPosts
 
@@ -293,11 +291,23 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         onDispose { lifecycle.lifecycle.removeObserver(obs) }
     }
 
-    /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应 */
+    /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应。
+       2.7.8 起不再用 Toast —— 它弹在屏幕最下面，正好被底栏压住半截；改成顶部滑下来的小胶囊。 */
+    var tip by remember { mutableStateOf("") }
     LaunchedEffect(ui.note) {
         ui.note?.let { n ->
-            Toast.makeText(context, n, Toast.LENGTH_SHORT).show()
+            tip = n
             vm.clearNote()
+        }
+    }
+    /* 收回倒计时单独一条。
+       ⚠️ 千万别把 delay 写进上面那条：`clearNote()` 会把 note 变回 null，
+       `LaunchedEffect(ui.note)` 立刻被取消重启，倒计时跟着一起取消 ——
+       胶囊就再也收不回去了（2.7.8 自己踩过这个坑）。 */
+    LaunchedEffect(tip) {
+        if (tip.isNotBlank()) {
+            kotlinx.coroutines.delay(2200)
+            tip = ""
         }
     }
 
@@ -900,6 +910,14 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 showCount = if (picker == PICK_CAT) data.nav.count else true
             )
         }
+        /* 下拉刷新的结果提示（2.7.8）：放在最后一个子项 —— Box 里后画的盖在上面，
+           这样它在任何页面、任何浮层之上都能看见。 */
+        RefreshTip(
+            text = tip,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 10.dp)
+        )
     }
 
     /* 发现新版就弹一次；点「稍后」会把 latest 清掉，这次打开不再打扰（下次启动还会问） */

@@ -98,7 +98,10 @@ class Prefs private constructor(ctx: Context) {
         private set
 
     /** 导航页一进来就全部折起来，只看到分类目录 */
-    var navCollapsed by mutableStateOf(sp.getBoolean("navCollapsed", false))
+    /* 2.7.8：默认改成「进来先折叠」。分类换成三列网格之后，折叠态本身就是一张目录 ——
+       五十个分类一屏能扫完；全展开反而会变成「格子 → 标签云 → 格子」交替，看不清谁是谁。
+       只影响没点过这个开关的人（点过的话盘里已经存了自己的选择，不动它）。 */
+    var navCollapsed by mutableStateOf(sp.getBoolean("navCollapsed", true))
         private set
 
     /** 记住每篇文章读到哪里，下次点进去接着读 */
