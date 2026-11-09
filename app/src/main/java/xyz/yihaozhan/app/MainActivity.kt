@@ -76,6 +76,7 @@ import kotlin.math.roundToInt
 import xyz.yihaozhan.app.data.Post
 import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.MusicPlay
+import xyz.yihaozhan.app.data.Notes
 import xyz.yihaozhan.app.data.Prefs
 import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
@@ -93,6 +94,7 @@ import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.MusicScreen
+import xyz.yihaozhan.app.ui.NoteScreen
 import xyz.yihaozhan.app.ui.PickItem
 import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
@@ -205,6 +207,14 @@ class MainActivity : ComponentActivity() {
  */
 private fun isMusicUrl(u: String): Boolean = u.contains("#/music")
 
+/**
+ * 这条链接是不是站点那个「随手记」页。
+ *
+ * 跟 [isMusicUrl] 一个道理：导航里是完整网址（`…/xingyu/#/note`），
+ * 后台自定义入口里也可能只写 `#/note`。认出来就开原生页，别塞 WebView。
+ */
+private fun isNoteUrl(u: String): Boolean = u.contains("#/note")
+
 private data class Tab(val id: Int, val label: String, val icon: ImageVector)/* id 就是「底栏排序 / 显隐」设置里存的那个数字，别改 */
 private val TABS = listOf(
     Tab(0, "首页", Icons.Rounded.Home),
@@ -261,6 +271,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 本地音乐（2.6.9）：从导航页「万物归一 → 本地音乐」进来。
        以前这条链接指向网页版 #/music（WebView 里跑），现在换成本内置页。 */
     var musicOpen by rememberSaveable { mutableStateOf(false) }
+    /* 随手记（2.7.7）：以前也是拿 WebView 打开站点 #/note，现在原生了。
+       数据在 Notes 里（字段跟网页版同形），第一次进来会把网页版攒的搬过来。 */
+    var noteOpen by rememberSaveable { mutableStateOf(false) }
+    val notes = remember { Notes.of(context) }
+    LaunchedEffect(Unit) { notes.migrateFromWeb(context) }
 
     /*
      * 回到前台时对一次内容。
@@ -337,9 +352,12 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 when (u.removePrefix("app://").trimEnd('/')) {
                     "extract" -> exOpen = true
                     "check" -> checkOpen = true
+                    "note" -> noteOpen = true
                 }
             } else if (isMusicUrl(u)) {
                 musicOpen = true
+            } else if (isNoteUrl(u)) {
+                noteOpen = true
             } else if (prefs.linkInApp) {
                 /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
                    裸网址）一律按默认开着 */
@@ -476,7 +494,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
        按返回直接把 App 干掉（用户报的就是灵感随记那个）。 */
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
-            helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen || musicOpen
+            helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen || musicOpen ||
+            noteOpen
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -490,6 +509,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             checkOpen -> checkOpen = false
             /* 音乐页退出去**不**停播 —— 它是个控制面板，不是播放开关 */
             musicOpen -> musicOpen = false
+            noteOpen -> noteOpen = false
             else -> openPost = null
         }
     }
@@ -606,6 +626,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                         musicOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                             MusicScreen { musicOpen = false }
                         }
+                        noteOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            NoteScreen(notes = notes) { noteOpen = false }
+                        }
                         openPost != null -> {
                             /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
                                顺序跟文章列表共用 orderedPosts()，滑到的下一篇一定是列表里挨着的那篇。 */
@@ -686,6 +709,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                         raw.startsWith("about") -> aboutOpen = true
                                         /* 本地音乐：站点的 #/music 在 App 里是内置页 */
                                         raw.startsWith("music") -> musicOpen = true
+                                        /* 随手记：站点的 #/note 也是内置页了（2.7.7） */
+                                        raw.startsWith("note") -> noteOpen = true
                                         /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
                                            跟网页端顶栏那条「👣 足迹」一个去处 */
                                         raw.startsWith("insight") -> footOpen = true
