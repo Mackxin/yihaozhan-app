@@ -355,7 +355,8 @@ class Notes private constructor(ctx: Context) {
             return t.take(24)
         }
 
-        /** 卡片上那两行摘要：剥掉标记、压成一行 */
+        /** 卡片上那两行摘要：剥掉标记、压成一行。
+            只剩标题的笔记返回空串 —— 让卡片直接不画摘要，别写一句「空白笔记」占位 */
         fun snippetOf(content: String, title: String): String {
             var c = content
                 .replace(Regex("(?m)^#{1,6}\\s*"), "")
@@ -363,7 +364,7 @@ class Notes private constructor(ctx: Context) {
                 .replace(Regex("\\s+"), " ")
                 .trim()
             if (title.isNotEmpty() && c.startsWith(title)) c = c.removePrefix(title).trim()
-            return if (c.isEmpty()) "空白笔记" else c.take(56)
+            return c.take(56)
         }
 
         /** 纯文字字数（剥掉标记再数非空白字符） */
