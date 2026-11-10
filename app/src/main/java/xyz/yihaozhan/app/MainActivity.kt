@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -911,11 +912,14 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             )
         }
         /* 下拉刷新的结果提示（2.7.8）：放在最后一个子项 —— Box 里后画的盖在上面，
-           这样它在任何页面、任何浮层之上都能看见。 */
+           这样它在任何页面、任何浮层之上都能看见。
+           2.8.0 补 statusBarsPadding()：之前只留了 10dp，胶囊正好躲在状态栏底下，
+           电量、时钟、通知图标全压在字上（小宝的真机截图）。 */
         RefreshTip(
             text = tip,
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .statusBarsPadding()
                 .padding(top = 10.dp)
         )
     }

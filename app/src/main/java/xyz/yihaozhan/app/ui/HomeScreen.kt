@@ -444,9 +444,18 @@ private fun Hero(data: AppPayload, offline: Boolean, onTitleClick: () -> Unit = 
             .padding(horizontal = 40.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        /* 标题上面那行小字（2.8.0）。
+           以前直接把「建站日期」裸摆在这儿，而那个值是配置里的占位 2024-01-01，
+           小宝一眼就看出「时间对不上」。现在 app.json 给的是**最后更新那天**，
+           前端负责把语义写清楚：「最后更新 · 2026-11-10」；
+           后台把这一行自定义成别的文案（比如「自 2024 年起」）就原样显示，不再加前缀。 */
         if (data.site.since.isNotBlank()) {
+            val raw = data.site.since.trim()
+            val looksLikeDate = raw.length == 10 && raw[4] == '-' && raw[7] == '-' &&
+                raw.filterIndexed { i, _ -> i != 4 && i != 7 }.all { it.isDigit() }
             Text(
-                data.site.since, fontSize = 11.sp,
+                if (looksLikeDate) "最后更新 · " + raw else raw,
+                fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(6.dp))

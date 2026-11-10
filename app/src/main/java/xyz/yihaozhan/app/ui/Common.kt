@@ -406,7 +406,9 @@ fun NavMeta(text: String) {
         markBold(text, base = pal.mute, strong = pal.text, strongWeight = FontWeight.Bold),
         fontSize = 13.sp,
         lineHeight = 20.sp,
-        maxLines = 1
+        maxLines = 1,
+        /* 2.8.0：导航页头限死一行，窄屏 + 大字号时宁可省略号，也不要挤成两行 */
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
     )
 }
 

@@ -1072,13 +1072,6 @@ fun LinksScreen(
         foldedIds = if (open) emptySet() else groups.map { it.first.id }.toSet()
     }
 
-    /* 同时展开好几个分类时（默认的「全部展开」、或者搜索命中多个），
-       标签云会一段接一段地堆着 —— 不给个标题就分不清哪片属于哪个分类。
-       只展开一个时不加（格子自己亮着、内容紧跟其下，再加一行反而啰嗦）。 */
-    val manyOpen = remember(groups, foldedIds, searching) {
-        if (searching) groups.size > 1 else groups.count { it.first.id !in foldedIds } > 1
-    }
-
     /* 全展开还是全折叠，一个按钮切；文案跟着当前状态变，点一下就是「另一头」 */
     val allOpen = groups.isNotEmpty() && groups.all { isOpen(it.first.id) }
     val toggleAll: () -> Unit = { setAll(!allOpen) }
@@ -1126,15 +1119,19 @@ fun LinksScreen(
                     onTitleClick = { if (!searching) toggleAll() },
                     /* 站点是「一行统计 + 一颗胶囊」并排居中，这里照搬 */
                     side = {
-                        /* 用 FlowRow 而不是 Row：真机（窄屏 + 系统字号调大）上
-                           「共 2079 个站点 · 50 个分类 + 两颗胶囊」一行根本塞不下，
-                           Row 会把文字压扁到只剩一个「全」字。FlowRow 装不下就自己换行。 */
-                        FlowRow(
+                        /* 2.8.0：小宝要「一行显示完」。上一版用 FlowRow 会自动换行，
+                           结果「全部展开」掉到第二行孤零零一颗。
+                           现在硬排一行：统计文字吃掉剩余宽度（超了就省略），
+                           三颗胶囊固定宽度。文案也压短了（「共…个…个」→「2079 站点 · 50 分类」），
+                           360dp 的屏刚好放得下。 */
+                        Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            NavMeta("共 **${data.stats.links}** 个站点 · **${data.stats.cats}** 个分类")
+                            Box(Modifier.weight(1f)) {
+                                NavMeta("**${data.stats.links}** 站点 · **${data.stats.cats}** 分类")
+                            }
                             /* 两千个站点，翻十年也翻不到底 —— 让骰子替人挑一个。
                                跳过标了失效的，不然十次有三次开到打不开的 */
                             if (!searching) {
@@ -1149,7 +1146,7 @@ fun LinksScreen(
                             /* 只看收藏：只有真收藏过才露出来，免得空按 */
                             if (favSet.isNotEmpty()) {
                                 HeadPill(
-                                    "⭐ 收藏 ${favSet.size}",
+                                    "⭐ ${favSet.size}",
                                     active = onlyFav
                                 ) { onlyFav = !onlyFav }
                             }
@@ -1209,47 +1206,30 @@ fun LinksScreen(
                     }
                     item(key = "recent-gap") { Spacer(Modifier.height(12.dp)) }
                 }
-                /* 3 列网格（2.7.8）：以前一行一个分类，一屏只看得见七八个，五十类要翻半天。
-                   现在每行最多三个格子；数字紧跟分类名，折叠箭头去掉 —— 点格子就是展开 / 收起。 */
-                groups.chunked(3).forEach { row ->
-                    item(key = "H|" + row.joinToString("|") { it.first.id }) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(7.dp)
-                        ) {
-                            row.forEach { (cat, links) ->
-                                CatCell(
-                                    /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
-                                    icon = if (data.nav.catIcon) cat.icon else "",
-                                    name = cat.name,
-                                    /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
-                                    count = if (data.nav.count) links.size else -1,
-                                    open = isOpen(cat.id),
-                                    locked = searching,
-                                    modifier = Modifier.weight(1f),
-                                    /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
-                                    onClick = {
-                                        foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
-                                        else foldedIds + cat.id
-                                    }
-                                )
+                /* 一行一个分类（2.8.0 小宝定的）：三列网格虽然密，但分类名被压得很短，
+                   跟下面那摊标签的从属关系也看不清，所以改回一整行一个。
+                   每行是一条玻璃卡片：图标 + 名字 + 右边缘的站点数，不带折叠箭头
+                   （整条都能点，展开与否看底色）。 */
+                groups.forEach { (cat, links) ->
+                    item(key = "H|" + cat.id) {
+                        CatCell(
+                            /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
+                            icon = if (data.nav.catIcon) cat.icon else "",
+                            name = cat.name,
+                            /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
+                            count = if (data.nav.count) links.size else -1,
+                            open = isOpen(cat.id),
+                            locked = searching,
+                            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
+                            /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
+                            onClick = {
+                                foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
+                                else foldedIds + cat.id
                             }
-                            /* 凑不满三个时补空位，别让剩下的格子被拉宽 */
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                        }
+                        )
                     }
-                    /* 展开的分类，站点块紧跟在这一行格子下面，顺序才不乱 */
-                    row.filter { isOpen(it.first.id) }.forEach { (cat, links) ->
+                    if (isOpen(cat.id)) {
                         item(key = "B|" + cat.id) {
-                            if (manyOpen) {
-                                Text(
-                                    "· " + cat.name,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = pal.mute,
-                                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                                )
-                            }
                             /* 「显示项 → 介绍」开着就一行一个（名字 + 介绍），
                                否则还是标签云 —— 跟网页端「卡片列表 / 紧凑标签」两种密度对得上 */
                             if (data.nav.desc) {
@@ -1290,9 +1270,7 @@ fun LinksScreen(
                             }
                         }
                     }
-                    item(key = "S|" + row.joinToString("-") { it.first.id }) {
-                        Spacer(Modifier.height(10.dp))
-                    }
+                    item(key = "S|" + cat.id) { Spacer(Modifier.height(8.dp)) }
                 }
         }
     }
@@ -1337,12 +1315,14 @@ fun LinksScreen(
 }
 
 /**
- * 分类格子（2.7.8 从「一行一个标题」改成三列网格里的一个）。
+ * 分类那一行（2.8.0 定稿：**一行一个**，整条铺满宽度）。
  *
- * 一个格子 = 图标 + 分类名 + 站点数。数字**靠格子右边缘**（2.7.9 小宝定的）——
- * 三列的数字对齐成一条竖线，扫一眼就能比哪类内容多。
- * 右侧那个会转的箭头去掉了 —— 格子本身就是按钮，点一下展开、再点收起。
- * 展开态用 `glassHi` 提一档底色，一眼能看出哪些正开着。
+ * 一条 = 图标 + 分类名 + 站点数，数字**贴右边缘**（2.7.9 小宝定的，别改成紧跟名字，
+ * 那样几十行数字会高低不齐）。右侧那个会转的箭头去掉了 ——
+ * 整条本身就是按钮，点一下展开、再点收起；展开态用 `glassHi` 提一档底色。
+ *
+ * 走过一段弯路：2.7.8 改成过三列网格（一屏能看十八个），但分类名被压太短、
+ * 跟下面那摊标签的从属关系也糊了，2.8.0 又改回一行一个。改密度前先问小宝。
  */
 @Composable
 private fun CatCell(
@@ -1357,25 +1337,25 @@ private fun CatCell(
     val pal = LocalXyPal.current
     Row(
         modifier
-            .height(42.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(if (open) pal.glassHi else pal.glass)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 enabled = !locked
             ) { onClick() }
-            .padding(horizontal = 9.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         /* 站点后台「显示项 → 分类图标」关着就整块不画（网页端也是纯文字小标题） */
         if (icon.isNotBlank()) {
-            Text(icon, fontSize = 12.sp)
-            Spacer(Modifier.width(4.dp))
+            Text(icon, fontSize = 13.sp)
+            Spacer(Modifier.width(7.dp))
         }
         Text(
             name,
-            fontSize = 12.5.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
             color = pal.text,
             maxLines = 1,
@@ -1386,8 +1366,8 @@ private fun CatCell(
             modifier = Modifier.weight(1f)
         )
         if (count >= 0) {
-            Spacer(Modifier.width(5.dp))
-            Text("$count", fontSize = 10.5.sp, color = pal.mute, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+            Text("$count", fontSize = 11.5.sp, color = pal.mute, maxLines = 1)
         }
     }
 }
