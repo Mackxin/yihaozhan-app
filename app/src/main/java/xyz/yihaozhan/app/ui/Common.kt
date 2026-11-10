@@ -76,7 +76,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -711,43 +710,8 @@ fun StatRow(
     )
 }
 
-/**
- * 下拉刷新完的那一句反馈（2.7.8）。
- *
- * 以前是 `Toast` —— 弹在屏幕最下面，正好被底栏那颗药丸压住半截，
- * 而且没有任何入场动效，扫一眼很容易错过。现在改成从顶部滑下来的一颗小胶囊：
- * 淡入 + 往下落一点，2 秒后自己缩回去；底色用不透明的 `bgSoft`，不会透出下面的字。
- */
-@Composable
-fun RefreshTip(text: String, modifier: Modifier = Modifier) {
-    val pal = LocalXyPal.current
-    AnimatedVisibility(
-        visible = text.isNotBlank(),
-        enter = androidx.compose.animation.slideInVertically(
-            initialOffsetY = { -it }, animationSpec = tween(220)
-        ) + androidx.compose.animation.fadeIn(tween(160)),
-        exit = androidx.compose.animation.slideOutVertically(
-            targetOffsetY = { -it }, animationSpec = tween(180)
-        ) + androidx.compose.animation.fadeOut(tween(180)),
-        modifier = modifier
-    ) {
-        /* 目前只有三种文案（已更新到最新 / 已经是最新的了 / 连不上…），
-           带「连不上」「失败」的就是坏消息，配个警告图标 */
-        val ok = !text.contains("连不上") && !text.contains("失败")
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(99.dp))
-                .background(pal.bgSoft)
-                .border(1.dp, pal.outline, RoundedCornerShape(99.dp))
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(if (ok) "✓" else "⚠️", fontSize = 12.sp, color = if (ok) pal.inkA3 else pal.dim)
-            Spacer(Modifier.width(7.dp))
-            Text(text, fontSize = 12.5.sp, color = pal.text, maxLines = 1)
-        }
-    }
-}
+/* 2.8.1：下拉刷新的反馈改成画在顶栏搜索框右端（TopBar 的 RefreshTail），
+   Common 里那个顶部胶囊 RefreshTip 已删除。 */
 
 /** 细分隔线：站点不用描边，需要分块时才画一条极淡的线 */
 @Composable

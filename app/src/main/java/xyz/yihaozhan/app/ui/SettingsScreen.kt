@@ -251,7 +251,7 @@ fun SettingsScreen(
             item { GroupTitle("外观") }
             item {
                 SettingCard {
-                    Text("主题", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text("主题", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em)
                     Spacer(Modifier.height(10.dp))
                     Segmented(
                         options = listOf("跟随系统", "浅色", "深色"),
@@ -272,7 +272,7 @@ fun SettingsScreen(
                 SettingCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "正文字号", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            "正文字号", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
@@ -287,7 +287,7 @@ fun SettingsScreen(
                     Spacer(Modifier.height(14.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "行距", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            "行距", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
@@ -302,12 +302,12 @@ fun SettingsScreen(
                     Spacer(Modifier.height(14.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "正文字体", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            "正文字体", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
-                            prefs.fontName, fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            prefs.fontName, fontSize = 12.5.sp,
+                            color = LocalXyPal.current.mute
                         )
                     }
                     Spacer(Modifier.height(10.dp))
@@ -350,12 +350,12 @@ fun SettingsScreen(
                 SettingCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "卡片密度", fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            "卡片密度", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
-                            prefs.densityName, fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            prefs.densityName, fontSize = 12.5.sp,
+                            color = LocalXyPal.current.mute
                         )
                     }
                     Spacer(Modifier.height(4.dp))
@@ -428,7 +428,7 @@ fun SettingsScreen(
             item { GroupTitle("启动") }
             item {
                 SettingCard {
-                    Text("打开 App 停在", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text("打开 App 停在", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em)
                     Spacer(Modifier.height(3.dp))
                     Text(
                         "下次打开生效",
@@ -657,7 +657,7 @@ fun SettingsScreen(
                 SettingCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("离线缓存", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text("离线缓存", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em)
                             Spacer(Modifier.height(3.dp))
                             Text(
                                 "整站内容压在手机里，占 " + sizeText(cacheSize),
@@ -891,16 +891,36 @@ fun SettingsScreen(
 
 /* ------------------------------ 零件 ------------------------------ */
 
+/**
+ * 分组小标题（2.8.1 重排）。
+ *
+ * 以前只有一行灰字，十四个分组翻下来像一串没层次的流水账。现在前面加一道
+ * 3×13dp 的主色小竖条当「书签」，字提一档、字距收一点；上面留 22dp、下面只留 7dp ——
+ * 离上一块远、离自己的卡片近，眼一看就知道它管哪几张卡。
+ */
 @Composable
 private fun GroupTitle(text: String) {
-    Text(
-        text,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.18.em,
-        color = LocalXyPal.current.mute,
-        modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp)
-    )
+    val pal = LocalXyPal.current
+    Row(
+        Modifier.padding(start = 3.dp, top = 22.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(13.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(pal.grad())
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.13.em,
+            color = pal.dim
+        )
+    }
 }
 
 @Composable
@@ -911,7 +931,7 @@ private fun SettingCard(content: @Composable () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(pal.rMd.dp))
             .background(pal.glass)
-            .padding(horizontal = 15.dp, vertical = 15.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
     ) { content() }
 }
 
@@ -925,11 +945,11 @@ private fun SwitchRow(
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005).em)
             if (!desc.isNullOrBlank()) {
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    desc, fontSize = 11.5.sp, lineHeight = 17.sp,
+                    desc, fontSize = 12.sp, lineHeight = 18.sp,
                     color = LocalXyPal.current.mute
                 )
             }

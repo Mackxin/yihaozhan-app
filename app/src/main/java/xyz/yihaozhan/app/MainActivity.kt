@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -49,6 +48,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -96,7 +96,6 @@ import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.MusicScreen
 import xyz.yihaozhan.app.ui.NoteScreen
 import xyz.yihaozhan.app.ui.PickItem
-import xyz.yihaozhan.app.ui.RefreshTip
 import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
 import xyz.yihaozhan.app.ui.PullRefresh
@@ -295,6 +294,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应。
        2.7.8 起不再用 Toast —— 它弹在屏幕最下面，正好被底栏压住半截；改成顶部滑下来的小胶囊。 */
     var tip by remember { mutableStateOf("") }
+    /* 下拉进度（0~1），顶栏那颗小圈靠它画弧 —— 页面里不再画指示器了 */
+    var pullProgress by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(ui.note) {
         ui.note?.let { n ->
             tip = n
@@ -307,7 +308,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
        胶囊就再也收不回去了（2.7.8 自己踩过这个坑）。 */
     LaunchedEffect(tip) {
         if (tip.isNotBlank()) {
-            kotlinx.coroutines.delay(2200)
+            kotlinx.coroutines.delay(1800)
             tip = ""
         }
     }
@@ -757,6 +758,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                 onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
                                 onOpenSearch = { searchOpen = true },
                                 filter = filter,
+                                /* 下拉刷新的状态画在搜索框右端（2.8.1） */
+                                pullProgress = pullProgress,
+                                refreshing = ui.refreshing,
+                                refreshTip = tip,
                                 /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
                                 top = data.top
                             )
@@ -764,7 +769,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                             PullRefresh(
                                 refreshing = ui.refreshing,
                                 onRefresh = { vm.refresh() },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                /* 设置页是一堆开关，点一下立刻生效，下拉刷新对它没意义，
+                                   白转一个圈反而让人以为「要点刷新才存」 */
+                                enabled = visible.getOrElse(pager.currentPage) { 0 } != 4,
+                                onPull = { pullProgress = it }
                             ) {
                                 HorizontalPager(
                                     state = pager,
@@ -911,17 +920,6 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 showCount = if (picker == PICK_CAT) data.nav.count else true
             )
         }
-        /* 下拉刷新的结果提示（2.7.8）：放在最后一个子项 —— Box 里后画的盖在上面，
-           这样它在任何页面、任何浮层之上都能看见。
-           2.8.0 补 statusBarsPadding()：之前只留了 10dp，胶囊正好躲在状态栏底下，
-           电量、时钟、通知图标全压在字上（小宝的真机截图）。 */
-        RefreshTip(
-            text = tip,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 10.dp)
-        )
     }
 
     /* 发现新版就弹一次；点「稍后」会把 latest 清掉，这次打开不再打扰（下次启动还会问） */

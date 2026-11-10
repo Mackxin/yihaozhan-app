@@ -1,20 +1,11 @@
 package xyz.yihaozhan.app.ui
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,14 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -58,6 +43,11 @@ fun PullRefresh(
     refreshing: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    /* 这一页要不要下拉刷新。设置页那种「点一下就生效」的页面拉了也没意义，
+       而且会平白多出一个转圈（小宝 2.8.1：「设置页面不需要刷新吧」） */
+    enabled: Boolean = true,
+    /* 下拉进度（0~1）上报给顶栏 —— 指示器画在搜索框右边，不画在页面中间 */
+    onPull: (Float) -> Unit = {},
     content: @Composable BoxScope.() -> Unit
 ) {
     val density = LocalDensity.current
@@ -125,6 +115,18 @@ fun PullRefresh(
         if (!refreshing && pull > 0f) animate(pull, 0f) { v, _ -> pull = v }
     }
 
+    /* 进度上报：pull 一变就报一次（0~1），顶栏拿它画那段弧 */
+    LaunchedEffect(pull) { onPull((pull / threshold).coerceIn(0f, 1f)) }
+
+    if (!enabled) {
+        Box(modifier.fillMaxSize()) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.LocalOverscrollConfiguration provides null
+            ) { content() }
+        }
+        return
+    }
+
     Box(
         modifier
             .fillMaxSize()
@@ -166,66 +168,8 @@ fun PullRefresh(
                 content()
             }
         }
-
-        if (pull > 1f) {
-            val progress = (pull / threshold).coerceIn(0f, 1f)
-            val indH = with(density) { 34.dp.toPx() }
-            /* 空当还没拉出一个指示器的高度时（拉得浅），指示器淡入 —— 不硬压在标题上 */
-            val alpha = (pull / indH).coerceIn(0f, 1f)
-            val y = ((pull - indH) / 2f).coerceAtLeast(0f)
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .offset { IntOffset(0, y.roundToInt()) }
-                    .alpha(alpha)
-            ) {
-                Spinner(progress, spinning = refreshing || pull >= threshold)
-            }
-        }
     }
 }
 
-/** 小圆底 + 一段弧：拉的时候弧越来越长，到阈值后变成一直转 */
-@Composable
-private fun Spinner(progress: Float, spinning: Boolean) {
-    val pal = LocalXyPal.current
-    val spin = if (spinning) {
-        val t = rememberInfiniteTransition(label = "spin")
-        t.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing)),
-            label = "spinDeg"
-        ).value
-    } else {
-        0f
-    }
-
-    Box(
-        Modifier.size(34.dp).clip(CircleShape).background(pal.glass),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.size(17.dp)) {
-            val sw = 2.dp.toPx()
-            if (spinning) {
-                rotate(spin) {
-                    drawArc(
-                        color = pal.inkA1,
-                        startAngle = 0f,
-                        sweepAngle = 260f,
-                        useCenter = false,
-                        style = Stroke(width = sw, cap = StrokeCap.Round)
-                    )
-                }
-            } else {
-                drawArc(
-                    color = pal.inkA1,
-                    startAngle = -90f,
-                    sweepAngle = 300f * progress,
-                    useCenter = false,
-                    style = Stroke(width = sw, cap = StrokeCap.Round)
-                )
-            }
-        }
-    }
-}
+/* 2.8.1：页面中间那个转圈搬到顶栏（搜索框右边）去了，这里不再画指示器。
+   下拉时内容整体下移就是反馈；弧和转圈由 TopBar 的 RefreshTail 负责。 */

@@ -1,5 +1,14 @@
 package xyz.yihaozhan.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -14,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,8 +40,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +78,11 @@ fun TopBar(
     onTheme: () -> Unit,
     onOpenSearch: () -> Unit,
     filter: TopFilter? = null,
+    /* 下拉刷新的三件套（2.8.1）：进度弧 / 转圈 / 结果提示，都画在搜索框右端 ——
+       以前是页面中间一个大转圈 + 屏幕顶上一条胶囊，小宝嫌占地方。 */
+    pullProgress: Float = 0f,
+    refreshing: Boolean = false,
+    refreshTip: String = "",
     /* 后台「站点信息 → 顶栏显示」那六个开关；缺省全开 */
     top: TopCfg = TopCfg()
 ) {
@@ -152,7 +169,11 @@ fun TopBar(
             if (top.brandRowVisible && top.searchRowVisible) Spacer(Modifier.height(10.dp))
             if (top.searchRowVisible) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (top.search) SearchPill(searchText, Modifier.weight(1f), onOpenSearch)
+                if (top.search) {
+                    SearchPill(searchText, Modifier.weight(1f), onOpenSearch) {
+                        RefreshTail(pullProgress, refreshing, refreshTip)
+                    }
+                }
                 if (top.filter && filter != null) FilterPill(filter)
             }
             }
@@ -189,7 +210,12 @@ private fun TopAction(
 
 /** 搜索条：40dp 高、全圆角，只当入口用（点了开全屏搜索层） */
 @Composable
-private fun SearchPill(text: String, modifier: Modifier, onClick: () -> Unit) {
+private fun SearchPill(
+    text: String,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    tail: @Composable RowScope.() -> Unit = {}
+) {
     val pal = LocalXyPal.current
     Row(
         modifier
@@ -210,8 +236,77 @@ private fun SearchPill(text: String, modifier: Modifier, onClick: () -> Unit) {
             fontSize = 14.sp,
             color = if (text.isBlank()) pal.mute else pal.text,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            /* fill = false：占位文案短的时候别把右边撑满，尾巴（刷新状态）才好贴右 */
+            modifier = Modifier.weight(1f, fill = false)
         )
+        tail()
+    }
+}
+
+/**
+ * 搜索框右端那一小块：下拉进度弧 / 刷新中的转圈 / 刷完的 ✓ ⚠️。
+ *
+ * 为什么放这儿（2.8.1 小宝定的）：原来指示器是页面正中一颗 34dp 的大圆、
+ * 刷完再在屏幕顶上弹一条胶囊，两样都压内容；搜索框右端本来就有块空当，
+ * 借它显示，刷新完自己消失，页面一点不动。
+ *
+ * 三种状态互斥：拖动中画弧（越长越接近阈值）→ 松手后一直转 → 出结果后 ✓ 或 ⚠️。
+ */
+@Composable
+private fun RefreshTail(pull: Float, refreshing: Boolean, tip: String) {
+    val pal = LocalXyPal.current
+    val failed = tip.contains("连不上") || tip.contains("失败")
+    val show = refreshing || pull > 0.02f || tip.isNotBlank()
+    AnimatedVisibility(
+        visible = show,
+        enter = fadeIn(tween(120)),
+        exit = fadeOut(tween(220))
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (tip.isNotBlank() && !refreshing) {
+                Text(
+                    (if (failed) "⚠️ " else "✓ ") + tip,
+                    fontSize = 11.5.sp,
+                    color = if (failed) pal.dim else pal.mute,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Spinner16(progress = pull, spinning = refreshing)
+            }
+        }
+    }
+}
+
+/** 顶栏里那颗 16dp 的小圈：拉的时候弧越来越长，松手转起来 */
+@Composable
+private fun Spinner16(progress: Float, spinning: Boolean) {
+    val pal = LocalXyPal.current
+    val spin = if (spinning) {
+        val t = rememberInfiniteTransition(label = "topspin")
+        t.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(820, easing = LinearEasing)),
+            label = "topspinDeg"
+        ).value
+    } else 0f
+    Canvas(Modifier.padding(horizontal = 6.dp).size(16.dp)) {
+        val sw = 1.8.dp.toPx()
+        if (spinning) {
+            rotate(spin) {
+                drawArc(
+                    color = pal.inkA1, startAngle = 0f, sweepAngle = 260f,
+                    useCenter = false, style = Stroke(width = sw, cap = StrokeCap.Round)
+                )
+            }
+        } else {
+            drawArc(
+                color = pal.inkA1, startAngle = -90f, sweepAngle = 300f * progress,
+                useCenter = false, style = Stroke(width = sw, cap = StrokeCap.Round)
+            )
+        }
     }
 }
 
