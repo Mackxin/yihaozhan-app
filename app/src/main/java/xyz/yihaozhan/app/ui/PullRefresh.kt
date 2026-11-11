@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -58,10 +59,13 @@ fun PullRefresh(
     var pull by remember { mutableFloatStateOf(0f) }
     val currentRefreshing by rememberUpdatedState(refreshing)
     val currentOnRefresh by rememberUpdatedState(onRefresh)
+    /* 这一页到底要不要刷新：手势节点**永远挂着**，只让回调内部判断（见下面那段注释） */
+    val currentEnabled by rememberUpdatedState(enabled)
     val scope = rememberCoroutineScope()
 
     /* 松手后去哪：过阈值就刷新并停在 hold 位转圈，没过就弹回去 */
     fun settle() {
+        if (!currentEnabled) return
         if (pull >= threshold && !currentRefreshing) {
             currentOnRefresh()
             scope.launch { animate(pull, hold) { v, _ -> pull = v } }
@@ -74,6 +78,7 @@ fun PullRefresh(
         object : NestedScrollConnection {
             /* 手指往回推：先把拉出来的距离收掉，别让列表跟着起反作用力 */
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (!currentEnabled) return Offset.Zero
                 if (available.y < 0f && pull > 0f) {
                     val used = (-available.y).coerceAtMost(pull)
                     pull -= used
@@ -95,7 +100,7 @@ fun PullRefresh(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                if (available.y > 0f && !currentRefreshing) {
+                if (currentEnabled && available.y > 0f && !currentRefreshing) {
                     pull = (pull + available.y * 0.55f).coerceAtMost(threshold * 1.55f)
                     /* 说「我吃掉了」，列表才不会同时起一段回弹 */
                     return Offset(0f, available.y)
@@ -104,7 +109,7 @@ fun PullRefresh(
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                if (pull > 0f) settle()
+                if (currentEnabled && pull > 0f) settle()
                 return Velocity.Zero
             }
         }
@@ -115,18 +120,23 @@ fun PullRefresh(
         if (!refreshing && pull > 0f) animate(pull, 0f) { v, _ -> pull = v }
     }
 
-    /* 进度上报：pull 一变就报一次（0~1），顶栏拿它画那段弧 */
-    LaunchedEffect(pull) { onPull((pull / threshold).coerceIn(0f, 1f)) }
+    /* 进度上报：pull 一变就报一次（0~1），顶栏拿它画那段弧。
+       用 SideEffect 不用 LaunchedEffect —— 后者每帧都要取消+重启一个协程，纯属浪费 */
+    SideEffect { onPull(if (currentEnabled) (pull / threshold).coerceIn(0f, 1f) else 0f) }
 
-    if (!enabled) {
-        Box(modifier.fillMaxSize()) {
-            androidx.compose.runtime.CompositionLocalProvider(
-                androidx.compose.foundation.LocalOverscrollConfiguration provides null
-            ) { content() }
-        }
-        return
-    }
-
+    /*
+     * ⚠️ 手势 Modifier **必须恒定**，不能按 enabled 增删（2.8.2 修的真机卡死）。
+     *
+     * 踩过两次：
+     *   ① 2.8.1 写成 `if (!enabled) { Box { content() }; return }` —— 两个分支 content
+     *      挂在不同深度，enabled 一变整棵子树重建，pager 的动画直接断。
+     *   ② 改成 `val gestures = if (enabled) Modifier.nestedScroll(...) else Modifier`
+     *      还是卡：手指一松，pager 正要起 fling，这时 enabled 翻成 false 把 nestedScroll
+     *      从父链上摘掉 —— fling 的协程被取消，画面就停在「导航/设置各占半屏」不动了。
+     *
+     * 正解：nestedScroll 和 pointerInput 一直挂着，`enabled` 只在**回调内部**读。
+     * 组合结构、Modifier 链都是恒定的，pager 的滚动和 fling 全程不受影响。
+     */
     Box(
         modifier
             .fillMaxSize()
@@ -141,9 +151,10 @@ fun PullRefresh(
                 detectVerticalDragGestures(
                     onDragEnd = { settle() },
                     onDragCancel = {
-                        scope.launch { animate(pull, 0f) { v, _ -> pull = v } }
+                        if (currentEnabled) scope.launch { animate(pull, 0f) { v, _ -> pull = v } }
                     }
                 ) { change, dy ->
+                    if (!currentEnabled) return@detectVerticalDragGestures
                     if (change.isConsumed) return@detectVerticalDragGestures
                     if (dy > 0f) {
                         pull = (pull + dy * 0.55f).coerceAtMost(threshold * 1.55f)
@@ -156,7 +167,11 @@ fun PullRefresh(
             }
     ) {
         /* 内容按实际下拉距离往下走：顶部就露出一段空当，指示器待在里面，不会压到标题 */
-        Box(Modifier.fillMaxSize().offset { IntOffset(0, pull.roundToInt()) }) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .offset { IntOffset(0, if (currentEnabled) pull.roundToInt() else 0) }
+        ) {
             /*
              * 关掉列表自带的「拉伸回弹」（Android 12+ 的 stretch overscroll）：
              * 它会把列表到顶后剩下的那段拖动**自己吃干**，`onPostScroll` 就只拿到 0，

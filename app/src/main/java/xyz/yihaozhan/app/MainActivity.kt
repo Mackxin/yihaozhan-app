@@ -294,8 +294,14 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应。
        2.7.8 起不再用 Toast —— 它弹在屏幕最下面，正好被底栏压住半截；改成顶部滑下来的小胶囊。 */
     var tip by remember { mutableStateOf("") }
-    /* 下拉进度（0~1），顶栏那颗小圈靠它画弧 —— 页面里不再画指示器了 */
-    var pullProgress by remember { mutableFloatStateOf(0f) }
+    /* 下拉进度（0~1），顶栏那颗小圈靠它画弧 —— 页面里不再画指示器了。
+       ⚠️ 存成 MutableFloatState 对象、再用一个 remember 过的 lambda 去读（2.8.2 修的真机卡顿）：
+       2.8.1 是 `var pullProgress by ...` 然后在 AppRoot 里读出来传给 TopBar，
+       于是下拉/回弹的**每一帧**都会让 AppRoot 重组一次，连带里面整棵 HorizontalPager 一起重组，
+       手指在回弹动画还没结束时去滑页，就很容易把 pager 的滚动动画打断。
+       现在 AppRoot 只传引用不读值，读发生在 TopBar 的 RefreshTail 里，只重组那一小块。 */
+    val pullProgress = remember { mutableFloatStateOf(0f) }
+    val pullProgressReader = remember { { pullProgress.floatValue } }
     LaunchedEffect(ui.note) {
         ui.note?.let { n ->
             tip = n
@@ -388,8 +394,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     )
     val curId = visible.getOrElse(pager.currentPage) { visible.first() }
     /* 连续位置（当前页 + 拖到一半的偏移）：底栏那颗高亮胶囊靠它跟着手指平滑走。
-       翻页翻过去的瞬间 currentPage 加一、offsetFraction 正好变成 -0.5，两边接得上，不会跳。 */
-    val dockPos = pager.currentPage + pager.currentPageOffsetFraction
+       翻页翻过去的瞬间 currentPage 加一、offsetFraction 正好变成 -0.5，两边接得上，不会跳。
+       ⚠️ 包成 lambda 再传（2.8.2）：直接传 Float 的话这里每帧都在读，滑动时整个 AppRoot
+       （连同里面的 HorizontalPager）会被逐帧重组，滑起来发涩、回弹动画还容易被打断。
+       传 lambda 后读发生在 BottomDock 内部，只重组那颗底栏。 */
+    val dockPos = remember(pager) { { pager.currentPage + pager.currentPageOffsetFraction } }
 
     /* 底栏被改过（隐藏/换序）之后页数会变，把位置夹回范围内 */
     LaunchedEffect(prefs.tabOrder, prefs.tabHidden) {
@@ -759,7 +768,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                 onOpenSearch = { searchOpen = true },
                                 filter = filter,
                                 /* 下拉刷新的状态画在搜索框右端（2.8.1） */
-                                pullProgress = pullProgress,
+                                pullProgress = pullProgressReader,
                                 refreshing = ui.refreshing,
                                 refreshTip = tip,
                                 /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
@@ -771,9 +780,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                 onRefresh = { vm.refresh() },
                                 modifier = Modifier.weight(1f),
                                 /* 设置页是一堆开关，点一下立刻生效，下拉刷新对它没意义，
-                                   白转一个圈反而让人以为「要点刷新才存」 */
-                                enabled = visible.getOrElse(pager.currentPage) { 0 } != 4,
-                                onPull = { pullProgress = it }
+                                   白转一个圈反而让人以为「要点刷新才存」。
+                                   ⚠️ 用 settledPage 而不是 currentPage：currentPage 在滑动**过程中**
+                                   就会翻到目标页，会在过渡动画正跑着的时候把手势整条摘掉（2.8.2）。 */
+                                enabled = visible.getOrElse(pager.settledPage) { 0 } != 4,
+                                onPull = { pullProgress.floatValue = it }
                             ) {
                                 HorizontalPager(
                                     state = pager,
@@ -961,13 +972,15 @@ private data class Quint(
  */
 @Composable
 private fun BottomDock(
-    position: Float,
+    /* 连续位置用 lambda 传（2.8.2）：调用方不在外面读这个值，滑动时才不会每帧整棵树重组 */
+    position: () -> Float,
     current: Int,
     tabs: List<Int>,
     showIcons: Boolean,
     onPick: (Int) -> Unit
 ) {
     val pal = LocalXyPal.current
+    val pos = position()
     val gap = 1.dp
     val density = LocalDensity.current
     /* 按屏宽和 tab 数自适应，别写死 64dp —— 一开到「收藏」变六项，固定宽度会超出屏幕、
@@ -1000,7 +1013,7 @@ private fun BottomDock(
                    · 纯文字的那一版 —— 保持原来的整颗胶囊（四项都是 99dp 全圆角），
                      字少、每格窄，胶囊看着更整。
                    两种情况都跟着 pager 的连续位置滑，只是形状不同。 */
-                val at = position.roundToInt().coerceIn(0, count - 1)
+                val at = pos.roundToInt().coerceIn(0, count - 1)
                 val hlShape = if (!showIcons) {
                     RoundedCornerShape(99.dp)
                 } else when {
@@ -1012,7 +1025,7 @@ private fun BottomDock(
                 Box(
                     Modifier
                         .align(Alignment.CenterStart)
-                        .offset(x = (itemW + gap) * position)
+                        .offset(x = (itemW + gap) * pos)
                         .width(itemW)
                         .height(with(density) { rowH.toDp() })
                         .background(pal.glassHi, hlShape)

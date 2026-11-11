@@ -79,8 +79,10 @@ fun TopBar(
     onOpenSearch: () -> Unit,
     filter: TopFilter? = null,
     /* 下拉刷新的三件套（2.8.1）：进度弧 / 转圈 / 结果提示，都画在搜索框右端 ——
-       以前是页面中间一个大转圈 + 屏幕顶上一条胶囊，小宝嫌占地方。 */
-    pullProgress: Float = 0f,
+       以前是页面中间一个大转圈 + 屏幕顶上一条胶囊，小宝嫌占地方。
+       ⚠️ 进度传的是 **lambda 不是 Float**（2.8.2）：下拉时这个值每帧都在变，
+       传值的话整个调用方（AppRoot）都得跟着重组；传 lambda 就只让 RefreshTail 重组。 */
+    pullProgress: () -> Float = { 0f },
     refreshing: Boolean = false,
     refreshTip: String = "",
     /* 后台「站点信息 → 顶栏显示」那六个开关；缺省全开 */
@@ -171,8 +173,7 @@ fun TopBar(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (top.search) {
                     SearchPill(searchText, Modifier.weight(1f), onOpenSearch) {
-                        RefreshTail(pullProgress, refreshing, refreshTip)
-                    }
+                        RefreshTail(pullProgress, refreshing, refreshTip)                    }
                 }
                 if (top.filter && filter != null) FilterPill(filter)
             }
@@ -254,8 +255,10 @@ private fun SearchPill(
  * 三种状态互斥：拖动中画弧（越长越接近阈值）→ 松手后一直转 → 出结果后 ✓ 或 ⚠️。
  */
 @Composable
-private fun RefreshTail(pull: Float, refreshing: Boolean, tip: String) {
+private fun RefreshTail(pullProgress: () -> Float, refreshing: Boolean, tip: String) {
     val pal = LocalXyPal.current
+    /* 在这里读（而不是在 TopBar 里读）：值是每帧变的，读的一方才重组 */
+    val pull = pullProgress()
     val failed = tip.contains("连不上") || tip.contains("失败")
     val show = refreshing || pull > 0.02f || tip.isNotBlank()
     AnimatedVisibility(
