@@ -10,6 +10,12 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1094,4 +1100,108 @@ private fun sizeText(bytes: Long): String = when {
     bytes >= 1024L * 1024L -> String.format("%.0f MB", bytes / 1048576.0)
     bytes >= 1024L -> "${bytes / 1024} KB"
     else -> "$bytes B"
+}
+
+/* ------------------------------ 迷你播放条 ------------------------------ */
+
+/**
+ * 离开音乐页之后底下那条一直跟着的播放条（2.8.3，对齐网页版 v154 的 `.mu-mini`）。
+ *
+ * 为什么要有：播放器是进程里的单例 [MusicPlay]，音乐页关掉声音照样继续（前台服务顶着）——
+ * 但界面上一丝痕迹都没有，想暂停只能下拉通知栏，或者再进一次音乐页。
+ * 这一条给三个动作：点主体回音乐页、按中间那颗暂停/继续、按右边 × 直接停掉。
+ *
+ * 放哪儿由调用方决定（现在挂在 `Scaffold` 的 bottomBar 里、底栏正上方）。
+ * 不改成浮层是故意的：bottomBar 的高度会被 Scaffold 算进内容区 padding，
+ * 无论哪个页面都不会盖住正文最后一行，也不用和底栏、导航栏各自算一遍 offset。
+ */
+@Composable
+fun MiniMusicBar(onOpen: () -> Unit, navPad: Boolean = false) {
+    val ctx = LocalContext.current
+    val pal = LocalXyPal.current
+    /* 封面解码按 t.id + lib.rev 缓存，跟音乐页那张走同一份逻辑 */
+    val lib = remember { MusicLib.of(ctx) }
+    val cur = MusicPlay.cur
+
+    /* 收起动画要 180ms，那时 cur 已经是 null —— 留一份上一首，条才不会先变空再消失 */
+    var last by remember { mutableStateOf<Track?>(null) }
+    if (cur != null) last = cur
+    val shown = cur ?: last
+
+    AnimatedVisibility(
+        visible = cur != null,
+        enter = fadeIn(tween(160)) + expandVertically(tween(200)),
+        exit = fadeOut(tween(120)) + shrinkVertically(tween(180))
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                /* 底栏不在时（阅读页 / 网页预览让位）这一条就是最底下那个东西，
+                   得自己让开系统手势条 —— 否则那条白杠直接画在条身上。
+                   放在 padding / height 之前：inset 是往外加的一圈，不会把 52dp 压扁。 */
+                .then(if (navPad) Modifier.navigationBarsPadding() else Modifier)
+                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 4.dp)
+                .height(52.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(pal.bgSoft.copy(alpha = 0.94f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onOpen() }
+                .padding(start = 8.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Cover(lib, shown, 36.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    shown?.title?.ifBlank { "未命名" } ?: "本地音乐",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = pal.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    (if (MusicPlay.playing) "正在播放 · " else "已暂停 · ") +
+                        (shown?.artist?.ifBlank { "本地音乐" } ?: "本地音乐"),
+                    fontSize = 11.sp,
+                    color = pal.mute,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            /* 下面两颗圆按钮自己要吃掉点击，不然会被整条那个「回音乐页」抢走 */
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(pal.glassHi)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { MusicPlay.toggle() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (MusicPlay.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    if (MusicPlay.playing) "暂停" else "继续播放",
+                    Modifier.size(18.dp),
+                    tint = pal.inkA1
+                )
+            }
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { MusicPlay.stop() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Close, "关掉音乐", Modifier.size(17.dp), tint = pal.mute)
+            }
+        }
+    }
 }

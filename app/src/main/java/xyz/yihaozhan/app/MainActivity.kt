@@ -94,6 +94,7 @@ import xyz.yihaozhan.app.ui.IdeaScreen
 import xyz.yihaozhan.app.ui.LinksScreen
 import xyz.yihaozhan.app.ui.LocalXyPal
 import xyz.yihaozhan.app.ui.MusicScreen
+import xyz.yihaozhan.app.ui.MiniMusicBar
 import xyz.yihaozhan.app.ui.NoteScreen
 import xyz.yihaozhan.app.ui.PickItem
 import xyz.yihaozhan.app.ui.PickerSheet
@@ -554,27 +555,54 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
        所以跟 Scaffold 平级放在这个 Box 里，而不是塞进 Scaffold 的内容区。
        以前它们是 Dialog（另开一个窗口）—— 那个窗口只铺到状态栏下沿，
        浅色主题下会在状态栏那条露出一道压暗的灰带，状态栏图标也会变成白的看不清。 */
+    /* 迷你播放条点回来（2.8.3）：整屏浮层在 when 里排在音乐页前面，
+       只置 musicOpen 是看不见的 —— 得先把占着屏的那几个收掉。 */
+    val openMusicPage: () -> Unit = {
+        webUrl = null
+        openPost = null
+        ideaOpen = false
+        aboutOpen = false
+        footOpen = false
+        helpOpen = false
+        logOpen = false
+        tagOpen = ""
+        exOpen = false
+        checkOpen = false
+        noteOpen = false
+        musicOpen = true
+    }
+
     Box(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalOpenTag provides { t -> tagOpen = t }) {
             Scaffold(
                 /* 透明：底色交给下面那层极光，不然会把光晕盖住 */
                 containerColor = Color.Transparent,
                 bottomBar = {
-                    /* 底栏在「站外网页预览」时让位 —— 但后台给那条链接开了「显示底栏」就留着
-                       （2.7.6 新增：逐条可控，默认开着）。
-                       阅读页看设置：`dockInReader` 打开就留着（2.6.9 新增的开关），
-                       关着就是原样整屏看正文。
-                       内置页（灵感随记 / 关于 / 足迹 / 手册 / 版本更新 / 本地音乐）一律留着底栏 ——
-                       用户明确要求：「之后要是还有内置页面都要显示 tab 栏出来」。 */
-                    if ((webUrl == null || webDock) && (openPost == null || prefs.dockInReader)) {
-                        BottomDock(
-                            position = dockPos,
-                            current = curId,
-                            tabs = visible,
-                            showIcons = prefs.dockIcons
-                        ) { id ->
-                            val i = visible.indexOf(id)
-                            if (i >= 0) jump(id, false)
+                    Column {
+                        /* 底栏这会儿在不在（网页预览与阅读页可以让位）—— 迷你条要据此决定
+                           自己是不是最底下那个元素、要不要让开系统手势条 */
+                        val dockOn = (webUrl == null || webDock) &&
+                            (openPost == null || prefs.dockInReader)
+                        /* 音乐还在放、人已经离开音乐页 —— 底栏上面贴一条迷你条（2.8.3）。
+                           放进 bottomBar 而不是做成浮层：它占的高度会被 Scaffold 算进内容区
+                           padding，不管在哪个页面都不会盖住正文最后一行。 */
+                        if (!musicOpen) MiniMusicBar(onOpen = openMusicPage, navPad = !dockOn)
+                        /* 底栏在「站外网页预览」时让位 —— 但后台给那条链接开了「显示底栏」就留着
+                           （2.7.6 新增：逐条可控，默认开着）。
+                           阅读页看设置：`dockInReader` 打开就留着（2.6.9 新增的开关），
+                           关着就是原样整屏看正文。
+                           内置页（灵感随记 / 关于 / 足迹 / 手册 / 版本更新 / 本地音乐）一律留着底栏 ——
+                           用户明确要求：「之后要是还有内置页面都要显示 tab 栏出来」。 */
+                        if (dockOn) {
+                            BottomDock(
+                                position = dockPos,
+                                current = curId,
+                                tabs = visible,
+                                showIcons = prefs.dockIcons
+                            ) { id ->
+                                val i = visible.indexOf(id)
+                                if (i >= 0) jump(id, false)
+                            }
                         }
                     }
                 }
