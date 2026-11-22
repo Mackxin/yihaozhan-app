@@ -108,6 +108,7 @@ import xyz.yihaozhan.app.ui.PostsScreen
 import xyz.yihaozhan.app.ui.SavedScreen
 import xyz.yihaozhan.app.ui.SettingsScreen
 import xyz.yihaozhan.app.ui.WebScreen
+import xyz.yihaozhan.app.ui.TodoScreen
 import xyz.yihaozhan.app.ui.YiTheme
 import xyz.yihaozhan.app.ui.toggleEnd
 import xyz.yihaozhan.app.ui.rememberOpener
@@ -214,6 +215,14 @@ private fun isMusicUrl(u: String): Boolean = u.contains("#/music")
  */
 private fun isNoteUrl(u: String): Boolean = u.contains("#/note")
 
+/**
+ * 这条链接是不是站点那个「待办清单」页（v2.9）。
+ *
+ * 跟 [isMusicUrl] / [isNoteUrl] 一样：导航里是完整网址，后台自定义入口里也可能是
+ * 相对的 `#/todo`，认 `#/todo` 这一段就开原生页。
+ */
+private fun isTodoUrl(u: String): Boolean = u.contains("#/todo")
+
 private data class Tab(val id: Int, val label: String, val icon: ImageVector)/* id 就是「底栏排序 / 显隐」设置里存的那个数字，别改 */
 private val TABS = listOf(
     Tab(0, "首页", Icons.Rounded.Home),
@@ -273,6 +282,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 随手记（2.7.7）：以前也是拿 WebView 打开站点 #/note，现在原生了。
        数据在 Notes 里（字段跟网页版同形），第一次进来会把网页版攒的搬过来。 */
     var noteOpen by rememberSaveable { mutableStateOf(false) }
+    /* 待办清单（2.9）：导航「万物归一 → 待办清单」那条 `#/todo` 认领成这一页。
+       数据在 Todos 里（字段跟网页版同形，导出的 JSON 两边能互相导入）。 */
+    var todoOpen by rememberSaveable { mutableStateOf(false) }
     val notes = remember { Notes.of(context) }
     LaunchedEffect(Unit) { notes.migrateFromWeb(context) }
 
@@ -377,6 +389,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 musicOpen = true
             } else if (isNoteUrl(u)) {
                 noteOpen = true
+            } else if (isTodoUrl(u)) {
+                todoOpen = true
             } else if (prefs.linkInApp) {
                 /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
                    裸网址）一律按默认开着 */
@@ -517,7 +531,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
             helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen || musicOpen ||
-            noteOpen
+            noteOpen || todoOpen
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -532,6 +546,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             /* 音乐页退出去**不**停播 —— 它是个控制面板，不是播放开关 */
             musicOpen -> musicOpen = false
             noteOpen -> noteOpen = false
+            todoOpen -> todoOpen = false
             else -> openPost = null
         }
     }
@@ -678,6 +693,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                         noteOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                             NoteScreen(notes = notes) { noteOpen = false }
                         }
+                        todoOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            TodoScreen { todoOpen = false }
+                        }
                         openPost != null -> {
                             /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
                                顺序跟文章列表共用 orderedPosts()，滑到的下一篇一定是列表里挨着的那篇。 */
@@ -760,6 +778,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                         raw.startsWith("music") -> musicOpen = true
                                         /* 随手记：站点的 #/note 也是内置页了（2.7.7） */
                                         raw.startsWith("note") -> noteOpen = true
+                                        /* 待办清单：站点的 #/todo（2.9） */
+                                        raw.startsWith("todo") -> todoOpen = true
                                         /* 数据洞察 = 足迹页。2.6 起是内置整屏页（不再占底栏页签），
                                            跟网页端顶栏那条「👣 足迹」一个去处 */
                                         raw.startsWith("insight") -> footOpen = true
