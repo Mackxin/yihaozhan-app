@@ -581,19 +581,24 @@ fun PostDetailScreen(
                     }
                 }
                 itemsIndexed(blocks) { i, b ->
-                    /* 长按一段 → 底部弹动作条（存为摘录 / 复制 / 朗读这段）。
-                       这里不再套 SelectionContainer：它自己也吃长按（用来起拖拽选字），
-                       两个手势抢同一个事件只会互相打架 —— 而且手机上跨段拖选本来也选不全。
-                       换成「长按 = 整段摘」更合手，真要逐字选还能在「在浏览器里看这篇」里选。 */
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .pointerInput(b) {
-                                detectTapGestures(onLongPress = { picked = i })
-                            }
-                    ) {
-                        MdBlockView(b, fontScale, lineFactor, serif)
-                    }
+                    /*
+                     * 手势现在长在每一块内部（Markdown.kt 的 MdText），这儿只把两件事交出去：
+                     * 点正文里的链接 → 跟「在浏览器里看这篇」走同一个口子；长按这一块 → 底部弹动作条
+                     * （存为摘录 / 复制 / 朗读这段）。
+                     *
+                     * 为什么不再在这层套一层 Box 接长按：detectTapGestures 一进来就消费掉 down，
+                     * 父子两层各挂一个只会有一个收到 —— 以前 Text 上没手势才轮得到这层，
+                     * 现在 Text 要认链接，长按必须跟着搬进去一起判。
+                     *
+                     * 也不套 SelectionContainer：它自己也吃长按（用来起拖拽选字），
+                     * 两个抢同一个事件只会互相打架；手机上跨段拖选本来也选不全，
+                     * 「长按 = 整段摘」更合手，真要逐字选还能走「在浏览器里看这篇」。
+                     */
+                    MdBlockView(
+                        b, fontScale, lineFactor, serif,
+                        onLink = onOpen,
+                        onLongPress = { picked = i }
+                    )
                 }
                 item(key = "foot") {
                     Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {

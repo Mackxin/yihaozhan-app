@@ -1,6 +1,7 @@
 package xyz.yihaozhan.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -15,15 +16,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -149,6 +159,12 @@ fun parseMarkdown(md: String): List<MdBlock> {
 private fun splitRow(line: String): List<String> =
     line.trim().trim('|').split('|').map { it.trim() }
 
+/**
+ * 链接地址存在 AnnotatedString 的哪个标注名下。
+ * 只有本文件写、本文件读 —— 外面只拿到「点到的地址字符串」，不需要知道这套机制。
+ */
+private const val MD_URL = "xy.md.url"
+
 /** 行内语法：`code`、**粗**、*斜*、[文字](链接)、~~删除~~ */
 fun inlineMd(src: String): AnnotatedString = buildAnnotatedString { inlineInto(this, src) }
 
@@ -200,10 +216,20 @@ private fun inlineInto(sb: AnnotatedString.Builder, src: String) {
             if (close > i && close + 1 < src.length && src[close + 1] == '(') {
                 val end = src.indexOf(')', close)
                 if (end > close) {
+                    /* 先把链接文字渲染好，再按**绝对下标**给这段挂上地址。
+                       不写成 pushStringAnnotation + pop：样式栈和标注栈共用 pop()，
+                       外面还套着粗体时退的那一层未必是刚压进去的标注，很容易退错。 */
+                    val from = sb.length
                     sb.pushStyle(SpanStyle(color = Color(0xFF4F5BD5), textDecoration = TextDecoration.Underline))
                     /* 链接文字本身也可能带样式（`**[粗体链接](url)**`），这里同样递归一遍 */
                     inlineInto(sb, src.substring(i + 1, close))
                     sb.pop()
+                    val url = src.substring(close + 2, end).trim().removeSurrounding("<", ">")
+                    /* 空下标段（`[](url)`）不挂标注：AnnotatedString 要求 start < end，
+                       而且这种写法本来也没东西可点 */
+                    if (url.isNotEmpty() && sb.length > from) {
+                        sb.addStringAnnotation(MD_URL, url, from, sb.length)
+                    }
                     i = end + 1; continue
                 }
             }
@@ -229,6 +255,92 @@ fun MarkdownView(md: String, modifier: Modifier = Modifier, fontScale: Float = 1
     }
 }
 
+/**
+ * 点的这个位置算不算点在某条链接上。
+ *
+ * 不直接用 `getStringAnnotations(tag, at, at)` 的原因：它内部是**区间包含**判定，
+ * 正好点在链接首字、末字外侧那一两像素时，取出来的 offset 会落在链接外面，判定就落空，
+ * 手感上就是「明明戳着链接却没反应」。这里改成按**字符距离**算：
+ * 落在链接里算命中，差一两个字符也算（手指比字宽），差得更远就不认。
+ */
+private fun urlNear(text: AnnotatedString, at: Int): String? {
+    var best: String? = null
+    var bestGap = 3
+    for (r in text.getStringAnnotations(MD_URL, 0, text.length)) {
+        val gap = when {
+            at < r.start -> r.start - at
+            at > r.end -> at - r.end
+            else -> 0
+        }
+        if (gap < bestGap) {
+            bestGap = gap
+            best = r.item
+        }
+    }
+    return best
+}
+
+/**
+ * 正文里的一小段字：**点到链接就打开，长按整块交给调用方**（阅读页拿它弹「存摘录」）。
+ *
+ * 为什么两件事非得挤进同一个检测器：`detectTapGestures` 一进来就把 down 事件消费掉，
+ * 子级挂上手势之后，父级那层检测器再也收不到 down。以前阅读页是在每块外面套一层 Box
+ * 接长按，如果这里再单独给 Text 挂点击，长按就会整块失灵 —— 而存摘录是这页的核心动作，
+ * 不能为了点链接丢掉它。所以单击和长按都在这一层判：点到的位置落在链接那段字上就打开，
+ * 长按一律往上抛。
+ *
+ * 两个回调都不传时不挂任何手势：帮助页、关于页外面包着 SelectionContainer，
+ * 挂上手势会把「长按选字」抢走，那两页必须保持原样。
+ */
+@Composable
+private fun MdText(
+    text: AnnotatedString,
+    onLink: ((String) -> Unit)?,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    color: Color = Color.Unspecified,
+    textAlign: TextAlign? = null
+) {
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    /* 回调每重组一次就是新 lambda，直接拿它当 pointerInput 的 key 会把检测器反复重建，
+       滑动时正好把进行中的长按打断。键只用 text，回调走 rememberUpdatedState 取最新。 */
+    val linkRef = rememberUpdatedState(onLink)
+    val pressRef = rememberUpdatedState(onLongPress)
+
+    val gesture = if (onLink == null && onLongPress == null) Modifier else Modifier.pointerInput(text) {
+        detectTapGestures(
+            onTap = { pos ->
+                val tap = linkRef.value
+                val lay = layout
+                if (tap != null && lay != null && text.isNotEmpty()) {
+                    /* 点在最后一行右侧空白时 getOffsetForPosition 会返回 length（越界一格），
+                       往回夹一格，否则这一下明明贴着链接尾巴却取不到标注 */
+                    val off = lay.getOffsetForPosition(pos).coerceIn(0, text.length - 1)
+                    val url = urlNear(text, off)
+                    if (url != null) tap(url)
+                }
+            },
+            onLongPress = { pressRef.value?.invoke() }
+        )
+    }
+
+    Text(
+        text,
+        modifier = modifier.then(gesture),
+        color = color,
+        fontSize = fontSize,
+        lineHeight = lineHeight,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        textAlign = textAlign,
+        onTextLayout = { layout = it }
+    )
+}
+
 /** 单独渲染一个块。文章详情页拿它当 LazyColumn 的 item，目录才跳得准 */
 @Composable
 fun MdBlockView(
@@ -237,7 +349,11 @@ fun MdBlockView(
     /* 行距倍率：1 = 原来的松紧。设置页「行距」三档换算好传进来（1.7 / 1.95 / 2.2 除以基准） */
     lineFactor: Float = 1f,
     /* 正文字体：站点和设置里都能选衬线 / 无衬线 */
-    serif: Boolean = false
+    serif: Boolean = false,
+    /* 点正文里的 `[文字](链接)`。不传就只显示、点了没反应（帮助页那种纯阅读的地方） */
+    onLink: ((String) -> Unit)? = null,
+    /* 长按这一块（阅读页 → 存为摘录 / 复制 / 朗读）。不传就不接长按 */
+    onLongPress: (() -> Unit)? = null
 ) {
     val mono = FontFamily.Monospace
     /* 字号倍数来自设置页；行高一起放大，不然大字会挤在一起 */
@@ -246,8 +362,12 @@ fun MdBlockView(
     val bodyFam = if (serif) FontFamily.Serif else FontFamily.Default
 
     when (b) {
-        is MdBlock.Heading -> Text(
+        is MdBlock.Heading -> MdText(
             inlineMd(b.text),
+            onLink, onLongPress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = if (b.level <= 2) 8.dp else 4.dp),
             fontSize = sz(
                 when (b.level) {
                     1 -> 24f
@@ -257,12 +377,14 @@ fun MdBlockView(
                 }
             ),
             fontWeight = FontWeight.Bold,
-            lineHeight = sz(30f),
-            modifier = Modifier.padding(top = if (b.level <= 2) 8.dp else 4.dp)
+            lineHeight = sz(30f)
         )
 
-        is MdBlock.Para -> Text(
-            inlineMd(b.text), fontSize = sz(15.5f), lineHeight = lh(30f),
+        is MdBlock.Para -> MdText(
+            inlineMd(b.text),
+            onLink, onLongPress,
+            modifier = Modifier.fillMaxWidth(),
+            fontSize = sz(15.5f), lineHeight = lh(30f),
             fontFamily = bodyFam,
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -278,11 +400,14 @@ fun MdBlockView(
                     .fillMaxHeight()
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
-            Text(
-                inlineMd(b.text), fontSize = sz(15f), lineHeight = lh(29f),
+            MdText(
+                inlineMd(b.text),
+                onLink, onLongPress,
+                /* weight 而不是 wrap：热区铺满右边整行，短句子也能整段长按 */
+                modifier = Modifier.weight(1f).padding(start = 12.dp),
+                fontSize = sz(15f), lineHeight = lh(29f),
                 fontFamily = bodyFam,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -290,7 +415,12 @@ fun MdBlockView(
             b.items.forEach {
                 Row {
                     Text("•", fontSize = sz(16f), modifier = Modifier.padding(end = 8.dp))
-                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam)
+                    MdText(
+                        inlineMd(it),
+                        onLink, onLongPress,
+                        modifier = Modifier.weight(1f),
+                        fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam
+                    )
                 }
             }
         }
@@ -298,22 +428,33 @@ fun MdBlockView(
         is MdBlock.Numbers -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             b.items.forEachIndexed { idx, it ->
                 Row {
-                    Text("${idx + 1}.", fontSize = sz(16f), fontFamily = bodyFam, modifier = Modifier.padding(end = 8.dp))
-                    Text(inlineMd(it), fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam)
+                    Text(
+                        "${idx + 1}.",
+                        fontSize = sz(16f),
+                        fontFamily = bodyFam,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    MdText(
+                        inlineMd(it),
+                        onLink, onLongPress,
+                        modifier = Modifier.weight(1f),
+                        fontSize = sz(15.5f), lineHeight = lh(29f), fontFamily = bodyFam
+                    )
                 }
             }
         }
 
-        is MdBlock.Code -> Text(
-            b.code,
-            fontFamily = mono, fontSize = sz(13f), lineHeight = sz(21f),
+        is MdBlock.Code -> MdText(
+            AnnotatedString(b.code),
+            onLink, onLongPress,
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     MaterialTheme.colorScheme.surfaceVariant,
                     RoundedCornerShape(12.dp)
                 )
-                .padding(14.dp)
+                .padding(14.dp),
+            fontFamily = mono, fontSize = sz(13f), lineHeight = sz(21f)
         )
 
         /* 表格在手机上横向铺不开，改成「一行一条、格子用 · 隔开」。
@@ -325,11 +466,14 @@ fun MdBlockView(
                 .padding(vertical = 6.dp)
         ) {
             b.rows.forEachIndexed { idx, row ->
-                Text(
+                MdText(
                     inlineMd(row.joinToString("  ·  ")),
+                    onLink, onLongPress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
                     fontSize = sz(14f), lineHeight = sz(23f),
-                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal
                 )
             }
         }
