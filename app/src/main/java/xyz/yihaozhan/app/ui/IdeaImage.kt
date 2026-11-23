@@ -10,10 +10,8 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import xyz.yihaozhan.app.data.Idea
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
 import kotlin.math.max
 
 /** 存图用的配色（从当前主题的 XyPal 取来的 ARGB 整数） */
