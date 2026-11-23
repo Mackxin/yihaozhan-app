@@ -1,5 +1,7 @@
 package xyz.yihaozhan.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,7 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -38,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +61,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import xyz.yihaozhan.app.data.Todo
 import xyz.yihaozhan.app.data.Todos
 
@@ -82,7 +88,52 @@ fun TodoScreen(onBack: () -> Unit) {
     var draftPri by remember { mutableStateOf(0) }
     var draftDue by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<Todo?>(null) }
+    var moreOpen by remember { mutableStateOf(false) }
+    var askClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    /* ---- 备份 / 恢复：走系统文件选择器（SAF），一个存储权限都不用申请 ----
+       跟随手记、设置里那份备份一个套路：导出自己挑存哪（下载目录、网盘都行），
+       导入自己挑那份 JSON。两边都吃「网页版 #/todo 导出的那份」——字段本来就通用。 */
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val json = todos.exportJson()
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openOutputStream(uri)!!.use { it.write(json.toByteArray()) }
+                }.isSuccess
+            }
+            toast(
+                ctx,
+                if (ok) "已导出 ${todos.items.size} 条（${(json.length / 1024).coerceAtLeast(1)} KB）"
+                else "导出失败，换个位置再试试"
+            )
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+                }.getOrNull()
+            }
+            val n = if (text == null) -1
+            else withContext(Dispatchers.IO) { runCatching { todos.importJson(text) }.getOrDefault(-1) }
+            toast(
+                ctx,
+                when {
+                    n < 0 -> "这个文件读不了，确认是待办清单导出的 JSON"
+                    n == 0 -> "都是已有的，没有新增"
+                    else -> "导入 $n 条"
+                }
+            )
+        }
+    }
 
     /* 不自动聚焦输入框：一进来就弹键盘会把整个列表顶掉，看不到自己昨天写了什么。
        想加的时候点一下输入框就行 —— 跟网页版手机端一个取舍。 */
@@ -91,7 +142,7 @@ fun TodoScreen(onBack: () -> Unit) {
     val groups = remember(st.items, filter) { buildGroups(st, filter) }
 
     Column(Modifier.fillMaxSize()) {
-        /* 顶部：返回 + 标题 + 分享（导出一份 JSON 出去） */
+        /* 顶部：返回 + 标题 + 更多（导出 / 导入 / 清空已完成都收在里面） */
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -106,8 +157,11 @@ fun TodoScreen(onBack: () -> Unit) {
                 color = pal.dim,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { shareText(ctx, todos.exportJson()) }) {
-                Icon(Icons.Rounded.Share, "导出为 JSON", tint = pal.dim)
+            /* 2.9.1：以前这里只有一颗「分享」按钮，导入没入口、已完成也清不掉。
+               收成一颗「更多」，导入 / 导出 / 分享 / 清空都在里面 ——
+               跟音乐页、灵感页的「⋯」一个位置，拇指也够得着。 */
+            IconButton(onClick = { moreOpen = true }) {
+                Icon(Icons.Rounded.MoreVert, "更多", tint = pal.dim)
             }
         }
 
@@ -252,6 +306,12 @@ fun TodoScreen(onBack: () -> Unit) {
                                     Spacer(Modifier.weight(1f))
                                     Text(g.hint, fontSize = 11.5.sp, color = pal.mute)
                                 }
+                                /* 「已完成」这一组的标题右边直接给个「清空」——
+                                   攒了几十条以后，谁也不想滚到页脚再翻菜单 */
+                                if (g.key == "done") {
+                                    Spacer(Modifier.weight(1f))
+                                    TinyBtn("清空") { askClear = true }
+                                }
                             }
                             val last = g.rows.lastIndex
                             g.rows.forEachIndexed { i, t ->
@@ -270,11 +330,92 @@ fun TodoScreen(onBack: () -> Unit) {
 
             item("foot") {
                 Text(
-                    "存在这台手机上 · 换手机前点右上角把 JSON 分享出来，网页版「导入」能直接吃",
+                    "存在这台手机上 · 右上角「更多」能把整份清单导出成 JSON，\n换手机、搬去网页版都靠它",
                     fontSize = 11.sp, lineHeight = 18.sp, color = pal.mute,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(top = 22.dp)
                 )
+            }
+        }
+    }
+
+    /* ---------- 更多：导出 / 分享 / 导入 / 清空已完成 ---------- */
+    if (moreOpen) {
+        CardMenu(
+            title = "待办清单",
+            sub = "${todos.items.size} 条 · 已完成 ${todos.doneList.size} 条",
+            actions = listOfNotNull(
+                CardAction("📤", "导出 JSON 文件") {
+                    moreOpen = false
+                    /* 一条都没有就别让他对着文件选择器发呆 */
+                    if (todos.items.isEmpty()) toast(ctx, "清单是空的，没什么可导出的")
+                    else exportLauncher.launch("待办清单-${Todos.fileStamp()}.json")
+                },
+                CardAction("📨", "把 JSON 分享出去") {
+                    moreOpen = false
+                    shareText(ctx, todos.exportJson())
+                },
+                CardAction("📥", "导入 JSON") {
+                    moreOpen = false
+                    importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                },
+                /* 一条都没完成时不给这一项 —— 点了什么也不发生，反而让人怀疑是不是坏了 */
+                if (todos.doneList.isEmpty()) null
+                else CardAction("🧹", "清空已完成（${todos.doneList.size} 条）", danger = true) {
+                    moreOpen = false
+                    askClear = true
+                }
+            ),
+            onClose = { moreOpen = false }
+        )
+    }
+
+    /* 清空已完成要再问一句：删了就找不回来，而它挨着「导出」很容易点错 */
+    if (askClear) {
+        val n = todos.doneList.size
+        Dialog(onDismissRequest = { askClear = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(pal.bgSoft)
+                    .padding(20.dp)
+            ) {
+                Text("清空已完成的 $n 条？", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = pal.text)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "只删勾掉的那些，没做完的一条不动。删掉就找不回来了 —— 拿不准的话先「导出 JSON」存一份。",
+                    fontSize = 12.5.sp, lineHeight = 20.sp, color = pal.dim
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(pal.glass)
+                            .clickable { askClear = false }
+                            .padding(vertical = 11.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("先留着", fontSize = 13.5.sp, color = pal.dim, fontWeight = FontWeight.Medium)
+                    }
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(pal.glassHi)
+                            .clickable {
+                                val k = todos.clearDone()
+                                askClear = false
+                                toast(ctx, "清空了 $k 条")
+                            }
+                            .padding(vertical = 11.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("清空", fontSize = 13.5.sp, color = pal.star, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
@@ -347,6 +488,11 @@ private fun commitAdd(todos: Todos, text: String, dueSel: String, pri: Int, clea
         else -> ""
     }
     if (todos.add(text, due, pri) != null) clear()
+}
+
+/** 导入 / 导出的结果提示：这些操作要等文件选择器回来，用 Toast 不会挡着界面 */
+private fun toast(ctx: android.content.Context, msg: String) {
+    android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
 }
 
 /** 今日环：底环一档、进度一段渐变，中间是百分比与「2 / 3] */

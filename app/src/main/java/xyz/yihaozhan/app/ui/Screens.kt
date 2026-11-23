@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -35,6 +36,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.Toc
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
@@ -492,7 +495,7 @@ fun PostDetailScreen(
                     modifier = Modifier.weight(1f).padding(horizontal = 2.dp)
                 )
                 BarIcon(
-                    icon = if (spk.speaking) Icons.Rounded.StopCircle else Icons.Rounded.VolumeUp,
+                    icon = if (spk.speaking) Icons.Rounded.StopCircle else Icons.AutoMirrored.Rounded.VolumeUp,
                     desc = if (spk.speaking) "停止朗读" else "朗读这篇",
                     tint = if (spk.speaking) pal.inkA3 else pal.dim
                 ) {
@@ -674,7 +677,7 @@ fun PostDetailScreen(
                     )
                 }
                 if (canToc) {
-                    FloatSlot(Icons.Rounded.Toc, "文章目录") { showToc = true }
+                    FloatSlot(Icons.AutoMirrored.Rounded.Toc, "文章目录") { showToc = true }
                 }
             }
         }
@@ -1093,7 +1096,6 @@ fun LinksScreen(
     }
     val longLink: (LinkItem) -> Unit = { l -> if (!isAppPage(l.url)) menuFor = l }
     val recents = local?.recents.orEmpty()
-    val scope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize()) {
         /*
@@ -1195,32 +1197,35 @@ fun LinksScreen(
                     }
                     item(key = "recent-body") {
                         FlowRow(
-                            Modifier.fillMaxWidth().padding(top = 2.dp, start = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                            Modifier.fillMaxWidth().padding(top = 1.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             recents.forEach { r ->
                                 LinkChip(LinkItem(name = r.name, url = r.url)) { visit(r.name, r.url) }
                             }
                         }
                     }
-                    item(key = "recent-gap") { Spacer(Modifier.height(12.dp)) }
+                    item(key = "recent-gap") { Spacer(Modifier.height(14.dp)) }
                 }
-                /* 一行一个分类（2.8.0 小宝定的）：三列网格虽然密，但分类名被压得很短，
-                   跟下面那摊标签的从属关系也看不清，所以改回一整行一个。
-                   每行是一条玻璃卡片：图标 + 名字 + 右边缘的站点数，不带折叠箭头
-                   （整条都能点，展开与否看底色）。 */
+                /* 一行一个分类 —— 但标题不再是玻璃卡片，改成**纯文字标题行**
+                   （2.9.1 照网页端 .cat-block__head 改的）：
+                   左边分类名，右边一行灰色摘要「10 个站点 · 一句介绍…」，超了省略。
+                   站点标签也不带底色，直接铺在极光背景上，靠间距分组 ——
+                   这是网页端导航页现在的样子，两端终于长得一样了。 */
                 groups.forEach { (cat, links) ->
                     item(key = "H|" + cat.id) {
-                        CatCell(
+                        CatHead(
                             /* 「分类名前的 emoji」也是站点后台的开关，关掉就只留名字 */
                             icon = if (data.nav.catIcon) cat.icon else "",
                             name = cat.name,
                             /* -1 = 不显示站点数（站点后台「显示项 → 分类显示站点数」关掉时） */
                             count = if (data.nav.count) links.size else -1,
-                            open = isOpen(cat.id),
+                            /* 搜索时列表里全是命中项，说「站点」不准，介绍也不必再占地方 */
+                            desc = if (searching) "" else cat.desc,
                             locked = searching,
-                            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
+                            unit = if (searching) "个结果" else "个站点",
+                            modifier = Modifier.fillMaxWidth(),
                             /* 现在展开着（不在折叠集合里）→ 折起来；已经折着 → 打开 */
                             onClick = {
                                 foldedIds = if (cat.id in foldedIds) foldedIds - cat.id
@@ -1249,12 +1254,15 @@ fun LinksScreen(
                                     }
                                 }
                             } else {
+                                /* 间距跟网页端对齐：标签自己带 11×5 内距，
+                                   这里只补 5 的间隙 —— 相邻两个名字之间约 27dp，
+                                   行距 = 18 行高 + 10 + 4 ≈ 32dp，跟网页端一模一样 */
                                 FlowRow(
                                     Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 2.dp, start = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                        .padding(top = 1.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     links.forEach { l ->
                                         LinkChip(
@@ -1270,7 +1278,9 @@ fun LinksScreen(
                             }
                         }
                     }
-                    item(key = "S|" + cat.id) { Spacer(Modifier.height(8.dp)) }
+                    /* 分类之间留一口气：标题自带 7dp 上下内距，这里再补 10 —— 块间距约 24dp，
+                       跟网页端 .cat-block 的 margin-bottom 一个量级 */
+                    item(key = "S|" + cat.id) { Spacer(Modifier.height(10.dp)) }
                 }
         }
     }
@@ -1315,68 +1325,88 @@ fun LinksScreen(
 }
 
 /**
- * 分类那一行（2.8.0 定稿：**一行一个**，整条铺满宽度）。
+ * 分类标题行（2.9.1 改，照网页端 `.cat-block__head` 1:1 搬过来）。
  *
- * 一条 = 图标 + 分类名 + 站点数，数字**贴右边缘**（2.7.9 小宝定的，别改成紧跟名字，
- * 那样几十行数字会高低不齐）。右侧那个会转的箭头去掉了 ——
- * 整条本身就是按钮，点一下展开、再点收起；展开态用 `glassHi` 提一档底色。
+ * 左边分类名（粗体），右边一行灰色摘要「10 个站点 · 一句介绍」，放不下就省略。
+ * **不画卡片底**：网页端那一版就是让分类块直接贴在极光背景上，靠留白分组；
+ * 以前那条 48dp 玻璃条把几十个分类切成一格一格，视觉上跟下面的标签也断了从属关系。
  *
- * 走过一段弯路：2.7.8 改成过三列网格（一屏能看十八个），但分类名被压太短、
- * 跟下面那摊标签的从属关系也糊了，2.8.0 又改回一行一个。改密度前先问小宝。
+ * 整行仍可点：展开 / 收起。收起时下面没有标签，一眼就看得出来；
+ * 页头那颗「全部展开 / 全部折叠」是给两千个站点用的批量开关。
+ *
+ * 2.7.8 试过三列网格、2.8.0 改回一行一个玻璃条、2.9.1 去掉底改纯文字 —— 改这一页的密度前先问小宝。
  */
 @Composable
-private fun CatCell(
+private fun CatHead(
     icon: String,
     name: String,
     count: Int,
-    open: Boolean,
+    desc: String,
     locked: Boolean,
+    /* 数字后面那个量词：搜索时是「个结果」，平时是「个站点」 */
+    unit: String = "个站点",
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val pal = LocalXyPal.current
+    /* 摘要拼法跟网页端一致：`N 个站点 · 介绍`，两段有一半空着就只显示另一半 */
+    val summary = buildList {
+        if (count >= 0) add("$count$unit")
+        if (desc.isNotBlank()) add(desc.trim())
+    }.joinToString(" · ")
+
     Row(
         modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (open) pal.glassHi else pal.glass)
+            .clip(RoundedCornerShape(10.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 enabled = !locked
             ) { onClick() }
-            .padding(horizontal = 14.dp),
+            .padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         /* 站点后台「显示项 → 分类图标」关着就整块不画（网页端也是纯文字小标题） */
         if (icon.isNotBlank()) {
-            Text(icon, fontSize = 13.sp)
-            Spacer(Modifier.width(7.dp))
+            Text(icon, fontSize = 14.sp)
+            Spacer(Modifier.width(6.dp))
         }
         Text(
             name,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
             color = pal.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            /* weight(1f) 撑满剩余宽度（2.7.9 改回右侧）：名字吃掉中间所有空当，
-               数字就被顶到格子右边缘 —— 三列的数字对齐成一条竖线，扫一眼能比大小；
-               名字太长则省略号收尾，数字照样完整可见 */
-            modifier = Modifier.weight(1f)
+            /* 名字本身不参与分宽（它通常只有四五个字），但给个上限：
+               真有超长分类名时不至于把右边的摘要挤成一条缝 */
+            modifier = Modifier.widthIn(max = 150.dp)
         )
-        if (count >= 0) {
-            Spacer(Modifier.width(8.dp))
-            Text("$count", fontSize = 11.5.sp, color = pal.mute, maxLines = 1)
+        if (summary.isNotBlank()) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                summary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = pal.mute,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                /* weight(1f) 吃掉剩下的宽度，超了就从尾巴省略 —— 跟网页端 .count 一个行为 */
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
 
 /**
- * 导航里的一个站点：只留名字的流式小标签，宽度由名字长短决定。
- * 之前那个「图标 + 名字 + 三行描述」的卡片在手机上太重了 —— 一屏只能看四五个，
- * 两千个站点翻不到头；换成标签之后一屏能扫几十个，图标也省了（网站 favicon 拉不到，
- * 用的都是 emoji，反而花）。
+ * 导航里的一个站点：**只有名字的流式标签，不带底色**（2.9.1）。
+ *
+ * 以前是一颗玻璃小胶囊（圆角 + 淡底 + 内距），几十个排在一起像一堆药片，
+ * 两千个站点铺开时整页「全是块」。网页端 v127 就把底去掉了 ——
+ * 卡片只留内距、背景透明，靠间距分组。这里跟着改，两端终于长得一样。
+ *
+ * 内距还在（11 × 5）：一是点击热区不至于只有文字那么大，二是它决定了行距，
+ * 去掉之后标签会糊成一坨。
  */
 @Composable
 private fun LinkChip(
@@ -1392,8 +1422,8 @@ private fun LinkChip(
     val pal = LocalXyPal.current
     Row(
         Modifier
+            /* 不画底、不描边，只留一圈内距当热区 */
             .clip(RoundedCornerShape(pal.rSm.dp))
-            .background(pal.glass)
             /* 不用 combinedClickable：它要 @OptIn(ExperimentalFoundationApi)，
                而本项目把实验 API 当 error。detectTapGestures 一样能同时拿单击和长按 */
             .pointerInput(link.url) {
@@ -1402,7 +1432,7 @@ private fun LinkChip(
                     onLongPress = { onLongPress() }
                 )
             }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 11.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (fav) {
@@ -1415,8 +1445,8 @@ private fun LinkChip(
         }
         Text(
             link.name,
-            fontSize = 12.5.sp,
-            lineHeight = 17.sp,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             color = if (dead) pal.mute else pal.text,

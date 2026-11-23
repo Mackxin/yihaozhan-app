@@ -150,36 +150,49 @@ private fun splitRow(line: String): List<String> =
     line.trim().trim('|').split('|').map { it.trim() }
 
 /** 行内语法：`code`、**粗**、*斜*、[文字](链接)、~~删除~~ */
-fun inlineMd(src: String): AnnotatedString = buildAnnotatedString {
+fun inlineMd(src: String): AnnotatedString = buildAnnotatedString { inlineInto(this, src) }
+
+/**
+ * 把一段行内 Markdown 拆成带样式的文字，追加到 [sb]。
+ *
+ * **粗体 / 斜体里面要递归**：文章里到处是 `- **[📦 MacWK](https://macwk.com)**` 这种
+ * 「粗体包着链接」，以前把粗体中间那段原样 append 进去，方括号和圆括号就留在了正文里 ——
+ * 屏幕上读作「**[📦 MacWK](https://macwk.com)**」一整串，链接也点不动。
+ * 现在粗体里再走一遍这一套，链接照样识别、照样能点。
+ */
+private fun inlineInto(sb: AnnotatedString.Builder, src: String) {
     var i = 0
     while (i < src.length) {
         val c = src[i]
         if (c == '`') {
             val end = src.indexOf('`', i + 1)
             if (end > i) {
-                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22808AFF)))
-                append(src.substring(i + 1, end)); pop(); i = end + 1; continue
+                sb.pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22808AFF)))
+                sb.append(src.substring(i + 1, end)); sb.pop(); i = end + 1; continue
             }
         }
         if (c == '*' && i + 1 < src.length && src[i + 1] == '*') {
             val end = src.indexOf("**", i + 2)
             if (end > i) {
-                pushStyle(SpanStyle(fontWeight = FontWeight.SemiBold))
-                append(src.substring(i + 2, end)); pop(); i = end + 2; continue
+                sb.pushStyle(SpanStyle(fontWeight = FontWeight.SemiBold))
+                inlineInto(sb, src.substring(i + 2, end))
+                sb.pop(); i = end + 2; continue
             }
         }
         if (c == '*') {
             val end = src.indexOf('*', i + 1)
             if (end > i) {
-                pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
-                append(src.substring(i + 1, end)); pop(); i = end + 1; continue
+                sb.pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                inlineInto(sb, src.substring(i + 1, end))
+                sb.pop(); i = end + 1; continue
             }
         }
         if (c == '~' && i + 1 < src.length && src[i + 1] == '~') {
             val end = src.indexOf("~~", i + 2)
             if (end > i) {
-                pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
-                append(src.substring(i + 2, end)); pop(); i = end + 2; continue
+                sb.pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
+                inlineInto(sb, src.substring(i + 2, end))
+                sb.pop(); i = end + 2; continue
             }
         }
         if (c == '[') {
@@ -187,13 +200,15 @@ fun inlineMd(src: String): AnnotatedString = buildAnnotatedString {
             if (close > i && close + 1 < src.length && src[close + 1] == '(') {
                 val end = src.indexOf(')', close)
                 if (end > close) {
-                    pushStyle(SpanStyle(color = Color(0xFF4F5BD5), textDecoration = TextDecoration.Underline))
-                    append(src.substring(i + 1, close)); pop()
+                    sb.pushStyle(SpanStyle(color = Color(0xFF4F5BD5), textDecoration = TextDecoration.Underline))
+                    /* 链接文字本身也可能带样式（`**[粗体链接](url)**`），这里同样递归一遍 */
+                    inlineInto(sb, src.substring(i + 1, close))
+                    sb.pop()
                     i = end + 1; continue
                 }
             }
         }
-        append(c); i++
+        sb.append(c); i++
     }
 }
 

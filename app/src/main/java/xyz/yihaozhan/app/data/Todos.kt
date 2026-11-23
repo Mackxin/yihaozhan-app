@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -165,7 +167,9 @@ class Todos private constructor(ctx: Context) {
             TodoOut(
                 id = it.id, text = it.text, done = it.done, due = it.due,
                 priority = listOf("普通", "重要", "紧急")[it.pri.coerceIn(0, 2)],
-                createdAt = iso(it.at),
+                /* 时间戳为 0（手工导入的老条目）就输出空串 —— 别吐一个 1970 年出去，
+                   看着像数据坏了；导入时 parseIso("") 返回 null、还原成 0，往返是幂等的 */
+                createdAt = if (it.at > 0) iso(it.at) else "",
                 doneAt = if (it.doneAt > 0) iso(it.doneAt) else ""
             )
         }
@@ -187,35 +191,47 @@ class Todos private constructor(ctx: Context) {
 
     /**
      * 三种形状都认：
-     *   ① App 自己的 `[{ id, text, done, due, pri, at, doneAt }]`
-     *   ② 网页版导出的 `{ v, items: [...] }`（字段是 text / priority / createdAt）
-     *   ③ 上面两种的外层再包一层数组的情况
+     *   ① 网页版导出的 `{ app, v, exportedAt, items: [...] }`（字段 text / priority / createdAt）
+     *   ② App 自己导出的裸数组 `[{ id, text, done, due, priority, createdAt, doneAt }]`
+     *   ③ 极简的手写数组 `[{ text: "买牛奶" }]`
+     *
+     * **先按「导出形状」解，再退回内部形状** —— 顺序反过来会出事：
+     * 内部 [Todo] 的字段（id/text/done/due）是导出形状的子集，配着
+     * `ignoreUnknownKeys = true`，网页版那份 JSON 也能被它解成功，
+     * 只是 createdAt / doneAt 被静默丢掉 → 导进来的每一条「加入时间」都变成 0、
+     * 勾过的那些「完成时间」也全没。
+     *
+     * 导出形状的字段全可空（网页版会给 `doneAt: null`），所以不能靠"解出来就算数" ——
+     * 拿 `priority` 当裁判：导出形状一定有它（普通 / 重要 / 紧急），内部形状一定没有。
      *
      * 认不出来就返回空 —— 宁可什么都不做，也别把用户的清单冲掉。
      */
     private fun parseAny(text: String): List<Todo> {
-        runCatching { PRETTY.decodeFromString(LIST, text) }
-            .getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-
         val root = runCatching { PRETTY.parseToJsonElement(text) }.getOrNull() ?: return emptyList()
         val arrEl = when (root) {
-            is kotlinx.serialization.json.JsonArray -> root
-            is kotlinx.serialization.json.JsonObject -> root["items"] as? kotlinx.serialization.json.JsonArray
+            is JsonArray -> root
+            is JsonObject -> root["items"] as? JsonArray
             else -> null
         } ?: return emptyList()
 
-        runCatching { PRETTY.decodeFromJsonElement(LIST, arrEl) }
-            .getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-
         val outs = runCatching { PRETTY.decodeFromJsonElement(OUT_LIST, arrEl) }.getOrNull()
-            ?: return emptyList()
-        return outs.map {
-            Todo(
-                id = it.id, text = it.text, done = it.done, due = it.due.take(10),
-                pri = when (it.priority) { "紧急" -> 2; "重要" -> 1; else -> 0 },
-                at = System.currentTimeMillis(), doneAt = if (it.done) System.currentTimeMillis() else 0L
-            )
+        if (outs != null && outs.any { !it.priority.isNullOrBlank() }) {
+            return outs.filter { it.text.isNotBlank() }.map {
+                Todo(
+                    id = it.id.orEmpty(),
+                    text = it.text,
+                    done = it.done,
+                    due = it.due.orEmpty().take(10),
+                    pri = when (it.priority) { "紧急" -> 2; "重要" -> 1; else -> 0 },
+                    /* 时间照原样还原；确实没写的（老文件 / 手写 JSON）就留 0，
+                       不拿「此刻」冒充 —— 不然「昨天完成」会全变成「今天完成」 */
+                    at = parseIso(it.createdAt.orEmpty()) ?: 0L,
+                    doneAt = if (it.done) parseIso(it.doneAt.orEmpty()) ?: 0L else 0L
+                )
+            }
         }
+
+        return runCatching { PRETTY.decodeFromJsonElement(LIST, arrEl) }.getOrNull() ?: emptyList()
     }
 
     /* ------------------------------ 内部 ------------------------------ */
@@ -252,6 +268,15 @@ class Todos private constructor(ctx: Context) {
 
         fun today(): String = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
 
+        /**
+         * 导出文件名里的时间戳（`2026-11-23-2303`）。
+         *
+         * 只用日期的话，同一天导第二次就会撞上第一次那个文件名 ——
+         * 系统要么弹「替换」，要么默默盖掉之前那份。带上时分就各存各的。
+         */
+        fun fileStamp(): String =
+            SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.CHINA).format(Date())
+
         fun shift(days: Int): String {
             val c = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 0)
@@ -263,6 +288,34 @@ class Todos private constructor(ctx: Context) {
 
         private fun iso(ts: Long): String =
             SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZZZZZ", Locale.CHINA).format(Date(ts))
+
+        /**
+         * 把 ISO 时间串还原成毫秒。
+         *
+         * 两种来源长得不一样：网页版 `new Date().toISOString()` 给的是
+         * `2026-11-22T10:40:03.000Z`，App 自己导出的带本机偏移 `…+08:00`。
+         * minSdk 24 用不了 java.time，就用 SimpleDateFormat 的 `XXX`（ISO8601 时区）
+         * 逐条试 —— `XXX` 同时认 `Z` 和 `+08:00`。全试不中就返回 null，
+         * 由调用方决定要不要给个默认值，绝不在这里瞎猜。
+         */
+        private val ISO_PATTERNS = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd"
+        )
+
+        private fun parseIso(s: String): Long? {
+            if (s.isBlank()) return null
+            for (p in ISO_PATTERNS) {
+                val v = runCatching {
+                    SimpleDateFormat(p, Locale.CHINA).apply { isLenient = false }.parse(s)?.time
+                }.getOrNull()
+                if (v != null) return v
+            }
+            return null
+        }
 
         /** 到期日的说法：今天 / 明天 / 逾期 2 天 / 3 天后 / 11-28 */
         fun dueLabel(due: String): String {
@@ -312,14 +365,18 @@ class Todos private constructor(ctx: Context) {
  *
  * 不直接把 [Todo] 吐出去，是因为内部字段（`t`/`pri`/`at`）是给本机省体积的短名，
  * 导出的 JSON 得让人看得懂、也让网页版认得。
+ *
+ * 字段**全部可空**：网页版导出时 `doneAt` 给的就是 `null`（没勾过的条目），
+ * 非空 String 一碰到 null 就整个反序列化失败 —— 那就退回内部形状，
+ * 时间又被丢掉，白折腾。
  */
 @Serializable
 private data class TodoOut(
-    val id: String,
-    val text: String,
-    val done: Boolean,
-    val due: String,
-    val priority: String,
-    val createdAt: String,
-    val doneAt: String
+    val id: String? = null,
+    val text: String = "",
+    val done: Boolean = false,
+    val due: String? = null,
+    val priority: String? = null,
+    val createdAt: String? = null,
+    val doneAt: String? = null
 )
