@@ -372,7 +372,20 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         m
     }
     var webDock by rememberSaveable { mutableStateOf(true) }
-    val open: (String) -> Unit = { u ->
+    val open: (String) -> Unit = { rawU ->
+        /* 站点里的相对路径（assets/tools/yuchanqi.html 这种独立工具页）WebView 没法直接加载，
+           统一拼到站点根地址上；#/ 开头的站内路由也在这里兜一下，调用点自己拼过也不会重复。
+           站点根地址用的是数据源里那个 —— 配了镜像就是镜像，没配就是 Pages。 */
+        val root = (data?.site?.url ?: "").trimEnd('/')
+        val u = when {
+            rawU.isBlank() -> rawU
+            rawU.startsWith("app://") || rawU.startsWith("http://") ||
+                rawU.startsWith("https://") || rawU.startsWith("mailto:") ||
+                rawU.startsWith("tel:") -> rawU
+            rawU.startsWith("#") -> if (root.isEmpty()) rawU else root + "/" + rawU
+            root.isEmpty() -> rawU
+            else -> root + "/" + rawU.trimStart('/')
+        }
         if (u.isNotBlank()) {
             /* 导航页那条「本地音乐」在 app.json 里是完整网址（…/#/music）。
                认出来就开内置页，别再塞进 WebView —— 那正是「怎么不是内置的」那个问题。 */
@@ -394,7 +407,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             } else if (prefs.linkInApp) {
                 /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
                    裸网址）一律按默认开着 */
-                webDock = dockByUrl[u] ?: dockByUrl[u.trimEnd('/')] ?: true
+                webDock = dockByUrl[rawU] ?: dockByUrl[u] ?: dockByUrl[u.trimEnd('/')] ?: true
                 webUrl = u
             } else {
                 external(u)
