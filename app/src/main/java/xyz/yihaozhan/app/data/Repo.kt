@@ -60,6 +60,16 @@ object Repo {
     var lastSource by androidx.compose.runtime.mutableStateOf("")
         private set
 
+    /**
+     * 这一次供货那台机器上的「站点根目录」（`http://yihaozhan.xyz` / `https://mackxin.github.io/xingyu`）。
+     *
+     * 用途只有一个：`api/app.json` 里的导航写死了 Pages 绝对地址，打开前要换成这台通的那台
+     * （见 MainActivity 的 `retargetOwn`）。raw / jsDelivr 只是「文件仓库」，当网页打开是一坨纯文本，
+     * 所以它们供货时这里留空，让调用方退回 `site.url`。
+     */
+    var lastBase by androidx.compose.runtime.mutableStateOf("")
+        private set
+
     /** 这一次拉取用了多久（毫秒），同样是排查用 */
     var lastMs by androidx.compose.runtime.mutableStateOf(0L)
         private set
@@ -322,6 +332,7 @@ object Repo {
             }
 
             lastSource = hostOf(winner)
+            lastBase = siteRootOf(winner)
             lastMs = System.currentTimeMillis() - t0
             /* 拉到的这份就是以后的缓存：下次冷启动先端它，秒开 */
             runCatching { file(ctx).writeText(text) }
@@ -407,6 +418,20 @@ object Repo {
 
     private fun hostOf(url: String): String =
         url.substringAfter("://", url).substringBefore("/").ifBlank { url }
+
+    /**
+     * 从 `…/api/app.json` 反推出站点根目录（给 [lastBase] 用）。
+     *
+     * raw / jsDelivr 那两条只是「文件仓库」：浏览器打开是纯文本，不能当页面用，
+     * 所以它们供货时返回空串 —— 调用方看到空串会退回数据里的 `site.url`。
+     */
+    private fun siteRootOf(url: String): String {
+        val i = url.indexOf("/api/app.json")
+        if (i <= 0) return ""
+        val base = url.substring(0, i)
+        if (base.contains("raw.githubusercontent.com") || base.contains("cdn.jsdelivr.net")) return ""
+        return base
+    }
 
     fun online(ctx: Context): Boolean {
         return runCatching {

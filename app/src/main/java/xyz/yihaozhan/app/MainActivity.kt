@@ -78,6 +78,7 @@ import xyz.yihaozhan.app.data.Local
 import xyz.yihaozhan.app.data.MusicPlay
 import xyz.yihaozhan.app.data.Notes
 import xyz.yihaozhan.app.data.Prefs
+import xyz.yihaozhan.app.data.Repo
 import xyz.yihaozhan.app.data.UpdateRepo
 import xyz.yihaozhan.app.ui.AboutScreen
 import xyz.yihaozhan.app.ui.AuroraBackground
@@ -222,6 +223,49 @@ private fun isNoteUrl(u: String): Boolean = u.contains("#/note")
  * 相对的 `#/todo`，认 `#/todo` 这一段就开原生页。
  */
 private fun isTodoUrl(u: String): Boolean = u.contains("#/todo")
+
+/**
+ * 站点那个「灵感随记」页 —— App 里有原生版（[IdeaScreen]），导航里点到就别再开网页了。
+ *
+ * 之前只有顶栏那颗自定义入口认这条，导航页里那条还是塞进 WebView 走 Pages，
+ * 结果同一个页面在 App 里有两个样子：一处是原生的、一处是转圈等半天的网页。
+ */
+private fun isIdeaUrl(u: String): Boolean = u.contains("#/idea")
+
+/** 站点那个「关于」页 —— 同上，App 有原生版（[AboutScreen]），正文从 `app.json` 的 about 段来。 */
+private fun isAboutUrl(u: String): Boolean = u.contains("#/about")
+
+/**
+ * 站点自己的几个地址前缀（Pages 子目录 + 镜像域名，大小写都算）。
+ *
+ * `api/app.json` 里的导航是写死的绝对地址，用的就是这几个前缀之一。
+ */
+private val OWN_BASES = listOf(
+    "https://mackxin.github.io/xingyu",
+    "http://mackxin.github.io/xingyu",
+    "https://yihaozhan.xyz",
+    "http://yihaozhan.xyz",
+    "https://www.yihaozhan.xyz",
+    "http://www.yihaozhan.xyz"
+)
+
+/**
+ * 把「自己站」的绝对地址改到 [root] 上，路径和 `#/xxx` 原样留着。
+ *
+ * 为什么必须改：导航里那些站内页写的是 `https://mackxin.github.io/xingyu/#/share`，
+ * 国内直连 Pages 经常转十几秒甚至干脆打不开；可同样的页面镜像上明明有一份。
+ * 配了镜像却还走最慢的那条路，表现就是「点进去一直白屏」。
+ * 只认自己这几个前缀，外站链接一个字都不动。
+ */
+private fun retargetOwn(u: String, root: String): String {
+    if (root.isEmpty() || u.isEmpty()) return u
+    for (b in OWN_BASES) {
+        if (u.length >= b.length && u.regionMatches(0, b, 0, b.length, ignoreCase = true)) {
+            return root + u.substring(b.length)
+        }
+    }
+    return u
+}
 
 private data class Tab(val id: Int, val label: String, val icon: ImageVector)/* id 就是「底栏排序 / 显隐」设置里存的那个数字，别改 */
 private val TABS = listOf(
@@ -376,8 +420,11 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         /* 站点里的相对路径（assets/tools/yuchanqi.html 这种独立工具页）WebView 没法直接加载，
            统一拼到站点根地址上；#/ 开头的站内路由也在这里兜一下，调用点自己拼过也不会重复。
            站点根地址用的是数据源里那个 —— 配了镜像就是镜像，没配就是 Pages。 */
-        val root = (data?.site?.url ?: "").trimEnd('/')
-        val u = when {
+        /* 站点根地址：优先「这次真拉到数据的那台机器」（配了镜像就是镜像），
+           冷启动读缓存时 Repo.lastBase 还是空的，退回数据里那份 site.url。
+           这个值不只用来拼相对路径，站内绝对地址也要靠它改道，见 retargetOwn。 */
+        val root = (Repo.lastBase.ifBlank { data?.site?.url.orEmpty() }).trimEnd('/')
+        val built = when {
             rawU.isBlank() -> rawU
             rawU.startsWith("app://") || rawU.startsWith("http://") ||
                 rawU.startsWith("https://") || rawU.startsWith("mailto:") ||
@@ -386,6 +433,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             root.isEmpty() -> rawU
             else -> root + "/" + rawU.trimStart('/')
         }
+        /* 自己站的绝对地址改走 root：Pages 在国内太慢，镜像上同样的页面却没人用 */
+        val u = retargetOwn(built, root)
         if (u.isNotBlank()) {
             /* 导航页那条「本地音乐」在 app.json 里是完整网址（…/#/music）。
                认出来就开内置页，别再塞进 WebView —— 那正是「怎么不是内置的」那个问题。 */
@@ -404,10 +453,15 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 noteOpen = true
             } else if (isTodoUrl(u)) {
                 todoOpen = true
+            } else if (isIdeaUrl(u)) {
+                ideaOpen = true
+            } else if (isAboutUrl(u)) {
+                aboutOpen = true
             } else if (prefs.linkInApp) {
                 /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
                    裸网址）一律按默认开着 */
-                webDock = dockByUrl[rawU] ?: dockByUrl[u] ?: dockByUrl[u.trimEnd('/')] ?: true
+                webDock = dockByUrl[rawU] ?: dockByUrl[built] ?: dockByUrl[u]
+                    ?: dockByUrl[u.trimEnd('/')] ?: true
                 webUrl = u
             } else {
                 external(u)
