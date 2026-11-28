@@ -258,6 +258,44 @@ private fun isShareUrl(u: String): Boolean {
 private fun isPregnantUrl(u: String): Boolean = u.contains("yuchanqi.html")
 
 /**
+ * 导航「万物归一」里那条「电池跑单」（`assets/tools/dianchipaodan.html`）。
+ *
+ * 这一条**不在 App 里重写**，认出来就一跳。
+ *
+ * 为什么不原生：站上那个网页工具是 6000 多行的单页应用，同样的功能早就在另一个
+ * 原生 App「骑手跑单」（`com.riderdesk.app`，riderdesk v1.41）里做过 —— 24 个页面、
+ * 29635 行 Kotlin、Room + WorkManager 提醒 + Gist 同步 + 报表导出。
+ * 再抄一份进这里，等于让同一笔账有两套各自漂移的实现，以后改一边就得记着另一边。
+ * 所以这里只负责「把人送到那个 App」，没装就送到下载。
+ */
+private fun isBatteryUrl(u: String): Boolean = u.contains("dianchipaodan.html")
+
+/** 「骑手跑单」的包名与下载地址（下载地址挂在站点上，跟 App 自己的 apk 一个目录） */
+private const val RIDER_PKG = "com.riderdesk.app"
+private const val RIDER_APK_URL = "http://yihaozhan.xyz/api/riderdesk.apk"
+
+/**
+ * 打开「骑手跑单」：装了就直接调起，没装就开浏览器下载。
+ *
+ * 用 `getLaunchIntentForPackage` 而不是写死 Activity 名 —— 那个 App 自己的启动页
+ * 以后可能换（它已经迭代到 41 版），写死 class 名迟早会失效。
+ */
+private fun launchRiderDesk(ctx: android.content.Context) {
+    val go = ctx.packageManager.getLaunchIntentForPackage(RIDER_PKG)
+    if (go != null) {
+        runCatching { ctx.startActivity(go.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        return
+    }
+    Toast.makeText(ctx, "还没装「骑手跑单」，已经帮你打开下载", Toast.LENGTH_LONG).show()
+    runCatching {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(RIDER_APK_URL))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+/**
  * 站点文章页 `#/post/<id>` 里的那个 id（不是文章页就是空串）。
  *
  * App 有原生阅读页（[PostDetailScreen]），文章正文就在 `app.json` 的 `posts` 里，
@@ -501,6 +539,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 aboutOpen = true
             } else if (isPregnantUrl(u)) {
                 pregOpen = true
+            } else if (isBatteryUrl(u)) {
+                /* 电池跑单：跳到「骑手跑单」那个独立 App（没装就给下载），不在 WebView 里跑 */
+                launchRiderDesk(context)
             } else if (isShareUrl(u)) {
                 /* 「壹号讯息」= 底栏的分享页签。被人从底栏关掉了就退回网页，总比点了没反应强 */
                 if (visible.contains(1)) pendingTab = 1

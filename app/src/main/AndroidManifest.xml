@@ -16,6 +16,14 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- 包可见性（Android 11+）。导航里那条「电池跑单」要跳到「骑手跑单」，
+         得先查它装没装。不在这里声明，getLaunchIntentForPackage() 对未声明的包
+         **永远返回 null** —— 表现就是「明明装了，点进去还是给我开浏览器下载」。
+         现在只声明这一个包，其余一概不查。 -->
+    <queries>
+        <package android:name="com.riderdesk.app" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
