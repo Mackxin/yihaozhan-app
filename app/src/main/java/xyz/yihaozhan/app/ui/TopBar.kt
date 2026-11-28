@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -55,6 +56,9 @@ import xyz.yihaozhan.app.data.TopCfg
 /** 顶栏右侧那颗筛选胶囊的文案与动作（导航=分类，分享/文章=标签） */
 data class TopFilter(val emoji: String, val label: String, val onClick: () -> Unit)
 
+/** 自定义链接一行最多摆几个（小宝 2026-11-28：「一行显示，最多显示五个链接」） */
+private const val MAX_TOP_LINKS = 5
+
 /**
  * 顶栏：站点手机版 `<header>` 那一套（390px 视口量出来的）。
  *
@@ -78,12 +82,13 @@ fun TopBar(
     onTheme: () -> Unit,
     onOpenSearch: () -> Unit,
     filter: TopFilter? = null,
-    /* 下拉刷新的三件套（2.8.1）：进度弧 / 转圈 / 结果提示，都画在搜索框右端 ——
-       以前是页面中间一个大转圈 + 屏幕顶上一条胶囊，小宝嫌占地方。
-       ⚠️ 进度传的是 **lambda 不是 Float**（2.8.2）：下拉时这个值每帧都在变，
-       传值的话整个调用方（AppRoot）都得跟着重组；传 lambda 就只让 RefreshTail 重组。 */
-    pullProgress: () -> Float = { 0f },
+    /* 2.9.5：下拉刷新改成搜索框右侧一颗**显式按钮**（小宝 2026-11-28：
+       「app端和移动端的下拉刷新改成图中那里增加一个刷新按钮」）。
+       下拉手势连同顶部那圈进度弧一起去掉了，refreshing 只用来让这颗按钮转圈。 */
     refreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
+    /* 刷新结果那句「已是最新 / 连不上」现在由页面顶部的胶囊统一提示（MainActivity 的 tip），
+       这里只留参数不动，免得调用方还要跟着改 */
     refreshTip: String = "",
     /* 后台「站点信息 → 顶栏显示」那六个开关；缺省全开 */
     top: TopCfg = TopCfg()
@@ -137,27 +142,11 @@ fun TopBar(
                     )
                 }
                 }
-                /* 自定义入口（站点后台「自定义链接」那几条）：占住中间剩下的宽度，
-                   条目多了就地横滑，右侧对齐贴着后面两颗固定键 —— 这样只有一条时
-                   也不会在中间飘着。
-                   左边没品牌时改左对齐：否则左边一大片空白、几颗键全挤在右边 */
-                val hugRight = top.brand
-                Row(
-                    Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(
-                        6.dp, if (hugRight) Alignment.End else Alignment.Start
-                    ),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (top.links) links.forEach { l ->
-                        val ico = l.icon.ifBlank { l.name.take(1) }
-                        TopAction(emoji = ico) { onLink(l) }
-                    }
-                }
+                /* 自定义入口 2.9.5 起**不再放这里** —— 挪到搜索框下面单独一行（见下面的链接行），
+                   以前和稍后读 / 主题挤在一起，条目一多就横滑，看不全。
+                   现在这一行只留两块固定内容：稍后读、白天/黑夜。 */
+                Spacer(Modifier.weight(1f))
                 if (top.saved) {
-                    Spacer(Modifier.width(6.dp))
                     TopAction(icon = Icons.Rounded.Schedule) { onSaved() }
                 }
                 if (top.theme) {
@@ -170,13 +159,33 @@ fun TopBar(
             }
             if (top.brandRowVisible && top.searchRowVisible) Spacer(Modifier.height(10.dp))
             if (top.searchRowVisible) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 if (top.search) {
-                    SearchPill(searchText, Modifier.weight(1f), onOpenSearch) {
-                        RefreshTail(pullProgress, refreshing, refreshTip)                    }
+                    SearchPill(searchText, Modifier.weight(1f), onOpenSearch)
+                    /* 刷新键钉在搜索框右边 —— 小宝图 1 红框那个位置 */
+                    RefreshAction(refreshing, onRefresh)
                 }
                 if (top.filter && filter != null) FilterPill(filter)
             }
+            }
+            /* 自定义链接行（2.9.5）：搜索框下面单独一行，一行最多 5 个、不横滑。
+               均分宽度，不足 5 个时用空白顶住 —— 只剩一条时也不会被拉成一整条长条。 */
+            if (top.links && links.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    /* 只按**实际条数**均分（最多 5 个）。以前补空格子凑够 5 份，
+                       结果只配了 3 条时每个只有 1/5 宽，「灵感随记」被截成「灵…」。
+                       fill = false：内容比分配宽度短时按内容宽，一条时不会拉满整行。 */
+                    links.take(MAX_TOP_LINKS).forEach { l ->
+                        TopLinkChip(l, Modifier.weight(1f, fill = false)) { onLink(l) }
+                    }
+                }
             }
         }
     }
@@ -206,6 +215,70 @@ private fun TopAction(
         } else {
             Text(emoji ?: "", fontSize = 15.sp)
         }
+    }
+}
+
+/**
+ * 搜索框右边那颗刷新键（2.9.5）。
+ *
+ * 取代原来的「下拉刷新」：以前要滚到顶再往下拽，现在点一下就行，
+ * 手机壳厚、贴了膜、或者列表本来就在顶部的时候都不会白拉。
+ * 40dp 见方、圆角 14，跟搜索条同高，正好填满小宝图 1 红框那块空当。
+ */
+@Composable
+private fun RefreshAction(refreshing: Boolean, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(pal.glassHi)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { if (!refreshing) onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (refreshing) {
+            Spinner16(progress = 1f, spinning = true)
+        } else {
+            Icon(Icons.Rounded.Refresh, "刷新", tint = pal.dim, modifier = Modifier.size(19.dp))
+        }
+    }
+}
+
+/**
+ * 搜索框下面那一行里的自定义链接（2.9.5）。
+ *
+ * 一条一个 34dp 小胶囊：图标 + 名字。宽度由外层 weight 均分（一行最多 5 个），
+ * 名字长了就省略号 —— 以前是「图标只有 emoji、名字全靠悬停」，手机上根本看不出是哪个。
+ */
+@Composable
+private fun TopLinkChip(link: SiteLink, modifier: Modifier, onClick: () -> Unit) {
+    val pal = LocalXyPal.current
+    val ico = link.icon.ifBlank { link.name.take(1) }
+    Row(
+        modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(pal.glassHi)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(ico, fontSize = 13.sp)
+        Spacer(Modifier.width(5.dp))
+        Text(
+            link.name,
+            fontSize = 12.sp,
+            color = pal.dim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -245,44 +318,11 @@ private fun SearchPill(
     }
 }
 
-/**
- * 搜索框右端那一小块：下拉进度弧 / 刷新中的转圈 / 刷完的 ✓ ⚠️。
- *
- * 为什么放这儿（2.8.1 小宝定的）：原来指示器是页面正中一颗 34dp 的大圆、
- * 刷完再在屏幕顶上弹一条胶囊，两样都压内容；搜索框右端本来就有块空当，
- * 借它显示，刷新完自己消失，页面一点不动。
- *
- * 三种状态互斥：拖动中画弧（越长越接近阈值）→ 松手后一直转 → 出结果后 ✓ 或 ⚠️。
- */
-@Composable
-private fun RefreshTail(pullProgress: () -> Float, refreshing: Boolean, tip: String) {
-    val pal = LocalXyPal.current
-    /* 在这里读（而不是在 TopBar 里读）：值是每帧变的，读的一方才重组 */
-    val pull = pullProgress()
-    val failed = tip.contains("连不上") || tip.contains("失败")
-    val show = refreshing || pull > 0.02f || tip.isNotBlank()
-    AnimatedVisibility(
-        visible = show,
-        enter = fadeIn(tween(120)),
-        exit = fadeOut(tween(220))
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (tip.isNotBlank() && !refreshing) {
-                Text(
-                    (if (failed) "⚠️ " else "✓ ") + tip,
-                    fontSize = 11.5.sp,
-                    color = if (failed) pal.dim else pal.mute,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            } else {
-                Spinner16(progress = pull, spinning = refreshing)
-            }
-        }
-    }
-}
+/* 2.9.5：原先钉在搜索框右端的 RefreshTail（下拉进度弧 / 转圈 / ✓ ⚠️）整段删掉了 ——
+   下拉手势取消，那一格换成了可点的 RefreshAction。刷完的提示仍由页面顶部胶囊负责，
+   所以这里不需要「再画一个小尾巴」。Spinner16 留着，刷新键转圈时用。 */
 
-/** 顶栏里那颗 16dp 的小圈：拉的时候弧越来越长，松手转起来 */
+/** 顶栏里那颗 16dp 的小圈：刷新中一直转 */
 @Composable
 private fun Spinner16(progress: Float, spinning: Boolean) {
     val pal = LocalXyPal.current

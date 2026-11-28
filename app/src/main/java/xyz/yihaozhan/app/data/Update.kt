@@ -30,7 +30,10 @@ data class VersionInfo(
     val versionName: String = "",
     val size: Long = 0,
     val notes: String = "",
-    val updated: String = ""
+    val updated: String = "",
+    /* 2.9.5 起发布工具会算好 sha256 一起写进清单。下完拿它验一遍内容 ——
+       只比大小是不够的：跨版本拼出来的包大小也一样。老清单没有这个字段，空着就跳过。 */
+    val sha256: String = ""
 )
 
 object UpdateRepo {
@@ -39,6 +42,10 @@ object UpdateRepo {
     val VERSION_URL = Repo.URL.replace("app.json", "app-version.json")
     val APK_URL = Repo.URL.replace("app.json", "app.apk")
     private const val APK_NAME = "update.apk"
+
+    /* 残包的「身份证」，跟 update.apk 放在一起，内容 `versionCode|etag`。
+       2.9.5 之前没有这个文件 —— 那些装不上的残包正是因为没有它。 */
+    private const val APK_META = "update.apk.meta"
 
     /**
      * 版本清单的候选地址，顺序跟内容源一致（镜像 → Pages → raw → jsDelivr）。
@@ -121,6 +128,45 @@ object UpdateRepo {
         File(ctx.cacheDir, APK_NAME).takeIf { it.exists() }?.length() ?: 0L
     }.getOrDefault(0L)
 
+    /* ---------------- 残包的身份证（2.9.5） ----------------
+       残包必须能证明自己是「哪一版的前半截」，否则拼起来就是个坏包。
+       内容就一行：`versionCode|etag`。老版本留下的残包没有这个文件，一律当不可信。 */
+
+    private fun metaFile(ctx: Context) = File(ctx.cacheDir, APK_META)
+
+    private fun readMeta(ctx: Context): String =
+        runCatching { metaFile(ctx).takeIf { it.exists() }?.readText().orEmpty() }.getOrDefault("")
+
+    /** 残包属于哪一版；没有身份证时给 -1（一定不等于任何 versionCode） */
+    private fun metaVersion(ctx: Context): Int =
+        readMeta(ctx).substringBefore('|').trim().toIntOrNull() ?: -1
+
+    private fun metaEtag(ctx: Context): String = readMeta(ctx).substringAfter('|', "").trim()
+
+    private fun writeMeta(ctx: Context, versionCode: Int, etag: String) {
+        runCatching { metaFile(ctx).writeText("$versionCode|$etag") }
+    }
+
+    /** 残包和身份证一起扔掉 —— 只删包不删 meta 会留下一段对不上的记忆 */
+    private fun dropPartial(ctx: Context) {
+        runCatching { File(ctx.cacheDir, APK_NAME).takeIf { it.exists() }?.delete() }
+        runCatching { metaFile(ctx).takeIf { it.exists() }?.delete() }
+    }
+
+    /** 算文件的 sha256（小写十六进制）。算不出来给空串，调用方当「没法验」处理 */
+    private fun sha256(file: File): String = runCatching {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    }.getOrDefault("")
+
     /**
      * 下安装包。onProgress 拿到 0..1（不知道总长度时就给 -1）。
      *
@@ -164,6 +210,16 @@ object UpdateRepo {
      * 弱网抖一下不至于白下 1.5 MB。
      *
      * 下完校验大小：GitHub Pages 偶尔会返回一张 404 的 HTML，别拿去安装。
+     *
+     * **2.9.5 修的坑：残包必须绑定版本号**。
+     * 以前只比大小，于是「上一版的前半截 + 这一版的后半截」拼出来的包**大小正好等于清单里的
+     * size**，App 认为下完了，交到安装器却报「解析包错误」（实测：拼接包 `unzip -l` 能列目录、
+     * `unzip -t` 报 CRC 错）。而残包一直不被清，所以每次都说「继续下载」、每次都装不上。
+     * 现在三件事一起做：
+     *   1. 残包旁边写 `update.apk.meta`（`versionCode|etag`），版本对不上就整个删掉重下；
+     *      没有 meta 的老残包一律不可信 —— 那正是坏包。
+     *   2. 续传带 `If-Range: <etag>`，服务端换过包会回 200 整份而不是给一截错位的字节。
+     *   3. 清单里有 `sha256` 就核一遍内容；对不上立刻删残包，不让它下次继续拼。
      */
     private fun downloadFrom(
         ctx: Context,
@@ -174,17 +230,30 @@ object UpdateRepo {
     ): File? {
         val out = File(ctx.cacheDir, APK_NAME)
         out.parentFile?.mkdirs()
-        if (!resume && out.exists()) out.delete()
+
+        /* 换源重下（resume=false）：残包连同身份证一起扔 */
+        if (!resume) dropPartial(ctx)
+
+        /* ⚠️ 残包必须是**同一版**才能接着拼。以前只比大小，于是「上一版的前半截 +
+           这一版的后半截」拼出来的包大小正好等于清单里的 size，安装器却报「解析包错误」。
+           没有身份证（2.9.5 之前留下的残包）一律不可信 —— 那正是坏包。 */
+        if (out.exists() && metaVersion(ctx) != info.versionCode) dropPartial(ctx)
+
         var have = if (out.exists()) out.length() else 0L
 
-        /* 已经下满（上次其实下完了，只是没来得及装）→ 直接交差 */
+        /* 已经下满（上次其实下完了，只是没来得及装）→ 验一下内容再交差。
+           只比大小不行：跨版本拼出来的包大小也一样。 */
         if (info.size > 0 && have == info.size) {
-            onProgress(1f)
-            return out
+            if (info.sha256.isBlank() || sha256(out).equals(info.sha256, ignoreCase = true)) {
+                onProgress(1f)
+                return out
+            }
+            dropPartial(ctx)
+            have = 0
         }
         /* 残包比目标还大：不是同一个包，别硬拼 */
         if (info.size > 0 && have > info.size) {
-            out.delete()
+            dropPartial(ctx)
             have = 0
         }
         /* 一上来就把进度摆到断点位置，不然界面会从 0 跳一下 */
@@ -194,12 +263,18 @@ object UpdateRepo {
         while (round < 2) {
             round++
             val builder = okhttp3.Request.Builder().url(url)
-            if (have > 0) builder.header("Range", "bytes=$have-")
+            if (have > 0) {
+                builder.header("Range", "bytes=$have-")
+                /* If-Range：服务端换过包（ETag 变了）会直接回 200 整份，而不是给一截
+                   对不上的字节。下面 `resumed` 只在 206 时成立，会自动从头写。 */
+                val etag = metaEtag(ctx)
+                if (etag.isNotBlank()) builder.header("If-Range", etag)
+            }
             client.newCall(builder.build()).execute().use { resp ->
                 when {
                     resp.code == 416 -> {
-                        /* 服务端说这个范围不合法 —— 残包跟它对不上，丢掉 */
-                        out.delete()
+                        /* 服务端说这个范围不合法 —— 残包跟它对不上，连身份证一起丢掉 */
+                        dropPartial(ctx)
                         have = 0
                     }
 
@@ -209,7 +284,8 @@ object UpdateRepo {
                             /* 只有「206 且手上有残包」才用追加模式写 */
                             val resumed = resp.code == 206 && have > 0
                             if (!resumed) {
-                                if (out.exists()) out.delete()
+                                /* 从头写：旧残包和旧身份证都不作数了 */
+                                dropPartial(ctx)
                                 have = 0
                             }
                             val total =
@@ -237,6 +313,8 @@ object UpdateRepo {
                                 os.flush()
                             }
                             have = out.length()
+                            /* 记下「这一截属于哪一版 + 服务端的 ETag」，下次续传先认这个 */
+                            writeMeta(ctx, info.versionCode, resp.header("ETag").orEmpty())
                         }
                     }
                 }
@@ -248,7 +326,14 @@ object UpdateRepo {
 
         if (out.length() < 1024 || (info.size > 0 && out.length() != info.size)) {
             /* 对不上就别拿去安装。残包留着（下次接着下），除非它已经超过目标大小 */
-            if (info.size > 0 && out.length() > info.size) out.delete()
+            if (info.size > 0 && out.length() > info.size) dropPartial(ctx)
+            return null
+        }
+        /* 大小对了也不算数：清单里有 sha256 就核一遍内容。对不上说明这一截拼错了，
+           必须把残包删掉 —— 留着它下次还会接着拼。 */
+        if (info.sha256.isNotBlank() && !sha256(out).equals(info.sha256, ignoreCase = true)) {
+            dropPartial(ctx)
+            onProgress(0f)
             return null
         }
         onProgress(1f)
@@ -299,8 +384,6 @@ object UpdateRepo {
         true
     }.getOrDefault(false)
 
-    /** 装完就没用了，别一直占着 cache */
-    fun clearApk(ctx: Context) {
-        runCatching { File(ctx.cacheDir, APK_NAME).takeIf { it.exists() }?.delete() }
-    }
+    /** 装完就没用了，别一直占着 cache（残包的身份证一起清） */
+    fun clearApk(ctx: Context) = dropPartial(ctx)
 }

@@ -351,14 +351,10 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 手动刷新（下拉）之后的一句话反馈：转完两秒什么都没变，会被当成没反应。
        2.7.8 起不再用 Toast —— 它弹在屏幕最下面，正好被底栏压住半截；改成顶部滑下来的小胶囊。 */
     var tip by remember { mutableStateOf("") }
-    /* 下拉进度（0~1），顶栏那颗小圈靠它画弧 —— 页面里不再画指示器了。
-       ⚠️ 存成 MutableFloatState 对象、再用一个 remember 过的 lambda 去读（2.8.2 修的真机卡顿）：
-       2.8.1 是 `var pullProgress by ...` 然后在 AppRoot 里读出来传给 TopBar，
-       于是下拉/回弹的**每一帧**都会让 AppRoot 重组一次，连带里面整棵 HorizontalPager 一起重组，
-       手指在回弹动画还没结束时去滑页，就很容易把 pager 的滚动动画打断。
-       现在 AppRoot 只传引用不读值，读发生在 TopBar 的 RefreshTail 里，只重组那一小块。 */
+    /* 下拉进度（0~1）。2.9.5 起下拉手势已经关掉、顶栏也不再画那圈进度弧，
+       这个状态只剩 PullRefresh 的 onPull 在写 —— 留着是因为拆掉它要连着改
+       PullRefresh 的签名和 pager 的布局，等按钮版跑稳了再一起清。 */
     val pullProgress = remember { mutableFloatStateOf(0f) }
-    val pullProgressReader = remember { { pullProgress.floatValue } }
     LaunchedEffect(ui.note) {
         ui.note?.let { n ->
             tip = n
@@ -882,23 +878,23 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                                 onTheme = { prefs.updateTheme(if (dark) "light" else "dark") },
                                 onOpenSearch = { searchOpen = true },
                                 filter = filter,
-                                /* 下拉刷新的状态画在搜索框右端（2.8.1） */
-                                pullProgress = pullProgressReader,
+                                /* 2.9.5：刷新入口改成搜索框右边那颗按钮（小宝：「下拉刷新改成
+                                   图中那里增加一个刷新按钮」），下拉手势在这一版已经关掉 */
                                 refreshing = ui.refreshing,
+                                onRefresh = { vm.refresh() },
                                 refreshTip = tip,
                                 /* 顶栏各块显隐：站点后台「站点信息 → 顶栏显示」说了算 */
                                 top = data.top
                             )
-                            /* 下拉刷新只包在内容页上：网页预览 / 阅读页下拉没意义 */
+                            /* 2.9.5：下拉刷新关掉了 —— 刷新只走搜索框右边那颗按钮。
+                               保留这层包裹是因为它同时是 pager 的 weight(1f) 容器，
+                               拆掉得连着调布局；enabled = false 时手势节点不接管任何事件，
+                               效果就是「拉不动」。想恢复下拉，把 enabled 改回原来的条件即可。 */
                             PullRefresh(
                                 refreshing = ui.refreshing,
                                 onRefresh = { vm.refresh() },
                                 modifier = Modifier.weight(1f),
-                                /* 设置页是一堆开关，点一下立刻生效，下拉刷新对它没意义，
-                                   白转一个圈反而让人以为「要点刷新才存」。
-                                   ⚠️ 用 settledPage 而不是 currentPage：currentPage 在滑动**过程中**
-                                   就会翻到目标页，会在过渡动画正跑着的时候把手势整条摘掉（2.8.2）。 */
-                                enabled = visible.getOrElse(pager.settledPage) { 0 } != 4,
+                                enabled = false,
                                 onPull = { pullProgress.floatValue = it }
                             ) {
                                 HorizontalPager(
