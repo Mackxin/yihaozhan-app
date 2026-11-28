@@ -100,6 +100,7 @@ import xyz.yihaozhan.app.ui.NoteScreen
 import xyz.yihaozhan.app.ui.PickItem
 import xyz.yihaozhan.app.ui.PickerSheet
 import xyz.yihaozhan.app.ui.PostDetailScreen
+import xyz.yihaozhan.app.ui.PregnancyScreen
 import xyz.yihaozhan.app.ui.PullRefresh
 import xyz.yihaozhan.app.ui.SearchOverlay
 import xyz.yihaozhan.app.ui.TopBar
@@ -236,6 +237,41 @@ private fun isIdeaUrl(u: String): Boolean = u.contains("#/idea")
 private fun isAboutUrl(u: String): Boolean = u.contains("#/about")
 
 /**
+ * 导航「万物归一」第一条「壹号讯息」—— 站点上是 `#/share`，App 里就是底栏那个「分享」页签。
+ *
+ * 以前它塞进 WebView：同一个列表，网页里一份、App 原生一份，样子还不一样。
+ * 现在认出来直接切页签，不再开网页。
+ */
+private fun isShareUrl(u: String): Boolean {
+    val at = u.indexOf("#/share")
+    if (at < 0) return false
+    /* 后面只允许是结尾 / 问号 / 斜杠 —— 免得把将来某个 #/share-xxx 也吃进来 */
+    val rest = u.substring(at + "#/share".length)
+    return rest.isEmpty() || rest[0] == '?' || rest[0] == '/' || rest[0] == '&'
+}
+
+/**
+ * 导航「万物归一」里那条「孕期全程管理」（`assets/tools/yuchanqi.html`）。
+ *
+ * 2.9.6 起 App 有原生版（[PregnancyScreen]），不再拿 WebView 打开那个 92KB 的单页应用。
+ */
+private fun isPregnantUrl(u: String): Boolean = u.contains("yuchanqi.html")
+
+/**
+ * 站点文章页 `#/post/<id>` 里的那个 id（不是文章页就是空串）。
+ *
+ * App 有原生阅读页（[PostDetailScreen]），文章正文就在 `app.json` 的 `posts` 里，
+ * 没必要为点一篇文章去 WebView 里把整站 JS 跑一遍。
+ */
+private fun postIdOf(u: String): String {
+    val at = u.indexOf("#/post/")
+    if (at < 0) return ""
+    return u.substring(at + "#/post/".length)
+        .substringBefore('#').substringBefore('?').substringBefore('&')
+        .trim().trimEnd('/')
+}
+
+/**
  * 站点自己的几个地址前缀（Pages 子目录 + 镜像域名，大小写都算）。
  *
  * `api/app.json` 里的导航是写死的绝对地址，用的就是这几个前缀之一。
@@ -329,6 +365,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* 待办清单（2.9）：导航「万物归一 → 待办清单」那条 `#/todo` 认领成这一页。
        数据在 Todos 里（字段跟网页版同形，导出的 JSON 两边能互相导入）。 */
     var todoOpen by rememberSaveable { mutableStateOf(false) }
+    /* 孕期全程管理（2.9.6）：以前是 WebView 打开站点那个单页工具，现在原生了 */
+    var pregOpen by rememberSaveable { mutableStateOf(false) }
     val notes = remember { Notes.of(context) }
     LaunchedEffect(Unit) { notes.migrateFromWeb(context) }
 
@@ -412,6 +450,14 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
         m
     }
     var webDock by rememberSaveable { mutableStateOf(true) }
+    /* 「这条链接开网页时要不要留底栏」。做成 lambda 是因为 open() 里有两处要用：
+       正文那条分支和各个兜底分支，抽出来省得抄三遍。 */
+    val dockOf: (String, String, String) -> Boolean = { rawU, built, u ->
+        dockByUrl[rawU] ?: dockByUrl[built] ?: dockByUrl[u] ?: dockByUrl[u.trimEnd('/')] ?: true
+    }
+    /* 导航里点「壹号讯息」要切到「分享」页签，可 pager / goPage 在这个 lambda 之后才建出来，
+       所以先记一笔，由下面那条 LaunchedEffect 去消费。 */
+    var pendingTab by remember { mutableStateOf<Int?>(null) }
     val open: (String) -> Unit = { rawU ->
         /* 站点里的相对路径（assets/tools/yuchanqi.html 这种独立工具页）WebView 没法直接加载，
            统一拼到站点根地址上；#/ 开头的站内路由也在这里兜一下，调用点自己拼过也不会重复。
@@ -453,11 +499,27 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                 ideaOpen = true
             } else if (isAboutUrl(u)) {
                 aboutOpen = true
+            } else if (isPregnantUrl(u)) {
+                pregOpen = true
+            } else if (isShareUrl(u)) {
+                /* 「壹号讯息」= 底栏的分享页签。被人从底栏关掉了就退回网页，总比点了没反应强 */
+                if (visible.contains(1)) pendingTab = 1
+                else {
+                    webDock = dockOf(rawU, built, u)
+                    webUrl = u
+                }
+            } else if (postIdOf(u).isNotEmpty()) {
+                /* 三篇文章：data 里有这篇就开原生阅读页；还没拉到数据才退回网页 */
+                val p = data?.posts?.firstOrNull { it.id == postIdOf(u) }
+                if (p != null) openPost = p
+                else {
+                    webDock = dockOf(rawU, built, u)
+                    webUrl = u
+                }
             } else if (prefs.linkInApp) {
                 /* 后台把这条链接的底栏关掉了就跟着关；查不到（比如首页推荐位、巡检结果里的
                    裸网址）一律按默认开着 */
-                webDock = dockByUrl[rawU] ?: dockByUrl[built] ?: dockByUrl[u]
-                    ?: dockByUrl[u.trimEnd('/')] ?: true
+                webDock = dockOf(rawU, built, u)
                 webUrl = u
             } else {
                 external(u)
@@ -503,8 +565,8 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     /* keepQuery：从搜索结果「看全部 N 个」跳过去时要留着关键词（那一页正好用它筛），
        而直接点底栏就是重新开始，关键词清掉。 */
     /* 目标页被藏在设置里时不能「点了毫无反应」（顶栏那颗 🕐 稍后读最容易撞上）：
-       先把它放回底栏，等重组把页数改好，再由下面那个 effect 翻过去 */
-    var pendingTab by remember { mutableStateOf<Int?>(null) }
+       先把它放回底栏，等重组把页数改好，再由下面那个 effect 翻过去。
+       ⚠️ 这个状态声明在 open() 之前 —— 「壹号讯息」那条链接也要用它切到分享页签。 */
     val jump: (Int, Boolean) -> Unit = { id, keepQuery ->
         openPost = null
         webUrl = null
@@ -594,7 +656,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
     BackHandler(
         enabled = webUrl != null || openPost != null || ideaOpen || aboutOpen || footOpen ||
             helpOpen || logOpen || tagOpen.isNotBlank() || exOpen || checkOpen || musicOpen ||
-            noteOpen || todoOpen
+            noteOpen || todoOpen || pregOpen
     ) {
         when {
             webUrl != null -> webUrl = null
@@ -610,6 +672,7 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
             musicOpen -> musicOpen = false
             noteOpen -> noteOpen = false
             todoOpen -> todoOpen = false
+            pregOpen -> pregOpen = false
             else -> openPost = null
         }
     }
@@ -758,6 +821,9 @@ private fun AppRoot(vm: MainVm, prefs: Prefs, dark: Boolean, hook: MutableState<
                         }
                         todoOpen -> Box(Modifier.fillMaxSize().enterRise()) {
                             TodoScreen { todoOpen = false }
+                        }
+                        pregOpen -> Box(Modifier.fillMaxSize().enterRise()) {
+                            PregnancyScreen { pregOpen = false }
                         }
                         openPost != null -> {
                             /* 阅读页也走 pager：左右滑动就是上一篇 / 下一篇，跟站点 POSTS 邻页一个体验。
