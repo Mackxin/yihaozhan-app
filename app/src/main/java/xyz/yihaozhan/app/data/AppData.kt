@@ -125,7 +125,13 @@ data class HomeCfg(
     val sponsorLink: String = "",
     /* 收款码（后台「首页内容 → 赞助 → 收款码」，最多几张）。
        老 json 没这段 → 空列表，赞助卡只显示文案，跟以前一样 */
-    val sponsorCodes: List<SponsorCode> = emptyList()
+    val sponsorCodes: List<SponsorCode> = emptyList(),
+    /* 首页大图（后台「首页内容 → 大图」）。2.9.4 起 App 首屏也显示这张。
+       gen-app-json 会把它拼成完整地址（assets/hero.jpg 这种相对路径 → 站点绝对地址）；
+       老 json 没这一段 → 空串，Hero 还是纯文字，跟以前一样。
+       heroFit：contain（整张塞进去，留白）/ cover（铺满裁边），跟网页端 imageFit 一个意思 */
+    val hero: String = "",
+    val heroFit: String = "contain"
 )
 
 /** 站点的阅读偏好（网页端 `read` 那份配置的只读副本） */

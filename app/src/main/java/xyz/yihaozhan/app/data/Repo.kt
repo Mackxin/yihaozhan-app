@@ -133,12 +133,17 @@ object Repo {
         } else raw
 
     /**
-     * 问镜像要数据：**先试 .gz，没有再退回原文件**。
+     * 问镜像要数据：**先拿 app.json 本体，.gz 只当兜底**（2.9.4 调整过顺序）。
      *
-     * 多花一次 404 的往返（几十毫秒），换掉的是 326 KB 的下载量 —— 值。
+     * 为什么反过来了：镜像前面挂着网宿 CDN，它把 `.gz` 当静态资源长缓存 ——
+     * 实测 2026-11-28 那次，源站上的 app.json.gz 已经是 build 202611280836，
+     * HTTP 取到的却一直是 202611280053（响应头 `NETEAST-CACHE: DISK_HIT`），
+     * 连带随机 query 都绕不过去（CDN 按 path 做 hash，不管参数）。
+     * 而 `app.json` 本身每次回源，永远是新的。
+     * 「先 .gz」省下的 350KB，换来的是**发布成功但 App 一直读上一版** —— 不值。
      */
     private fun fetchMirrorJson(url: String): String? {
-        for (u in listOf(gzUrl(url), url)) {
+        for (u in listOf(url, gzUrl(url))) {
             try {
                 mirrorClient.newCall(requestOf(u)).execute().use { resp ->
                     if (!resp.isSuccessful) return@use

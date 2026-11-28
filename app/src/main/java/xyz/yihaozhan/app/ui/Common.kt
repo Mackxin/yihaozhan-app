@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -832,4 +833,43 @@ fun RemoteImg(
             else -> Text("加载中…", fontSize = 11.sp, color = pal.mute)
         }
     }
+}
+
+/**
+ * 横幅图（2.9.4：首页那张大图）。
+ *
+ * 跟 RemoteImg 分家的两个理由：
+ *  · RemoteImg 是固定边长的方框、还写死了「收款码」这个 contentDescription；
+ *  · 横幅得按原图比例定高度。硬塞进方框会把 1000×365 裁得只剩中间一截 ——
+ *    网页端早先的 `imageShape: square` 就这么裁过，v176 才改成 auto。
+ *
+ * 图没加载出来就什么都不画（返回 false），调用方按「没有就不占位」处理，
+ * 别在首屏留一条空白。加载中的那几十毫秒同样不占位 —— 比先撑开再塌下去稳。
+ */
+@Composable
+fun RemoteBanner(
+    src: String,
+    modifier: Modifier = Modifier,
+    ratio: Float = 1000f / 365f,
+    corner: Dp = 18.dp,
+    fit: ContentScale = ContentScale.Fit
+): Boolean {
+    var bmp by remember(src) { mutableStateOf(imgCache[src]) }
+    LaunchedEffect(src) {
+        if (src.isBlank() || imgCache.containsKey(src)) return@LaunchedEffect
+        val b = withContext(Dispatchers.IO) { loadBitmap(src) }
+        imgCache[src] = b
+        if (b != null) bmp = b
+    }
+    val b = bmp ?: return false
+    Image(
+        bitmap = b.asImageBitmap(),
+        contentDescription = null,          // 纯装饰，标题就在下面
+        contentScale = fit,
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(ratio)
+            .clip(RoundedCornerShape(corner))
+    )
+    return true
 }

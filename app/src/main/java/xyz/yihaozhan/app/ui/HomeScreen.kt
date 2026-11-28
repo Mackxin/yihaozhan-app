@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -484,6 +485,28 @@ private fun Hero(data: AppPayload, offline: Boolean, onTitleClick: () -> Unit = 
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.primary
+            )
+        }
+        /* 首页大图（2.9.4）。后台「首页内容 → 大图」那张，跟网页端首屏是同一张。
+           放在标语下面、描述上面：网页端是「左文右图」两栏，手机竖屏放不下并排，
+           图跟在标题后面最像一回事。图没来（老 json / 断网）就整块跳过。
+           app.json 里给的是相对路径，这里用站点地址（App 配的镜像）拼完整 ——
+           走镜像比 GitHub Pages 快，跟站内其它链接一个路子。 */
+        val heroSrc = remember(data.home?.hero, data.site.url) {
+            val h = data.home?.hero.orEmpty().trim()
+            when {
+                h.isEmpty() -> ""
+                h.startsWith("http", true) || h.startsWith("data:", true) -> h
+                else -> data.site.url.trimEnd('/') + "/" + h.trimStart('/')
+            }
+        }
+        if (heroSrc.isNotBlank()) {
+            Spacer(Modifier.height(16.dp))
+            RemoteBanner(
+                src = heroSrc,
+                modifier = Modifier.padding(horizontal = 4.dp),
+                fit = if ((data.home?.heroFit ?: "contain") == "cover") ContentScale.Crop
+                      else ContentScale.Fit
             )
         }
         if (data.site.desc.isNotBlank()) {
